@@ -17,8 +17,6 @@ from scipy.ndimage import label
 from skimage.measure import regionprops
 import plotly.graph_objects as go
 import os
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 import pandas as pd
 from itertools import combinations
 import pickle
@@ -27,18 +25,23 @@ import ee
 ee.Initialize(project="ee-azizagrebi4")
 
 
-# In[ ]:
+# %%
 
 
-dem_country = "Burkina" # Pays sur lequel on va travailler ici
-accum_threshold = 500 # Seuil sur l'accumulation
-ridge_size = 30 # Seuil utiliser pour identifier les crêtes
-i, j = 3, 4 # On va diviser le grand .tif qui ne charge pas en ram en plusieurs sous-parties sous la forme d'un quadrillage. 
-            # i et j indiquent sur quelle sous-partie du quadrillage on va travailler.
+dem_country = "Burkina"  # Pays sur lequel on va travailler ici
+accum_threshold = 500  # Seuil sur l'accumulation
+ridge_size = 30  # Seuil utiliser pour identifier les crêtes
+
+# On va diviser le grand .tif qui ne charge pas en ram en plusieurs
+# sous-parties sous la forme d'un quadrillage.
+# i et j indiquent sur quelle sous-partie du quadrillage on va travailler.
+i, j = 3, 4
 
 
-# In[ ]:
+# %%
 
+# Simple dictionnaire utilisé pour faire la correspondance entre les
+# différents noms de mes fichiers.
 
 dem_to_inference = {
     "Benin": "Benin",
@@ -47,21 +50,25 @@ dem_to_inference = {
     "Mali": "Mali",
     "Niger": "Niger",
     "Togo": "Togo",
-} # Simple dictionnaire utilisé pour faire la correspondance entre les différents noms de mes fichiers. Inutile pour vous à priori.
+}
 
 inference_country = dem_to_inference[dem_country]
 
-with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src: # On ouvre le fichier .tif pour avoir ses propriétés
+with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src:
     transform = src.transform
     area = src.read(1)
     width = src.width
     height = src.height
 
-max_width = 5000 # Largeur d'une sous-partie du quadrillage
-max_height = 5000 # Hauteur d'une sous-partie du quadrillage
-padding = 100 # On ajoute à chaque sous-partie du quadrillage un léger recouvrement sur les parties voisines pour éviter les effets de bords dans les calculs.
+max_width = 5000  # Largeur d'une sous-partie du quadrillage
+max_height = 5000  # Hauteur d'une sous-partie du quadrillage
 
-i_max, j_max = height // max_height + int(height % max_height != 0), width // max_width + int(width % max_width != 0)
+# On ajoute à chaque sous-partie du quadrillage un léger recouvrement
+# sur les parties voisines pour éviter les effets de bords dans les calculs.
+padding = 100
+
+i_max = height // max_height + int(height % max_height != 0)
+j_max = width // max_width + int(width % max_width != 0)
 print(i_max, j_max)
 
 
@@ -73,7 +80,7 @@ col_min = max(0, j * max_width)
 row_max = min(height, row_min + max_height)
 col_max = min(width, col_min + max_width)
 
-with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src: # On charge et sauvegarde la sous-partie du quadrillage sur laquelle on veut travailler.
+with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src:
     transform = src.transform
     window = rasterio.windows.Window(max(0, col_min - padding), 
                                     max(0, row_min - padding), 
