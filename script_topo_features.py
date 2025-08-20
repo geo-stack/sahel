@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
-
-
 import rasterio
 from scipy import stats
 import numpy as np
@@ -106,7 +103,8 @@ def new_bresenham_line(row0, col0, row1, col1, thickness=1):
     scol = 1 if col0 < col1 else -1
     err = drow - dcol
 
-    is_first_point = True  # Flag to avoid adding the contour of the first point
+    # Flag to avoid adding the contour of the first point.
+    is_first_point = True
 
     while True:
         if is_first_point:
@@ -129,14 +127,17 @@ def new_bresenham_line(row0, col0, row1, col1, thickness=1):
             err += drow
             col0 += scol
 
-    return list(set(points))  # Avoid duplicates
+    return list(set(points))
 
 
-# List of countries and corresponding date methods
+# List of countries and corresponding date methods.
 dem_countries = ["Benin", "Burkina", "Guinee"]
-date_methods = ["datetime", "str", "datetime"] #Indicates the type of the column "DATE" in the csv
 
-# Mapping of countries to inference names i.e. "Benin.tif" for DEM and "BF.csv" for data points for example
+# Indicates the type of the column "DATE" in the csv.
+date_methods = ["datetime", "str", "datetime"]
+
+# Mapping of countries to inference names i.e. "Benin.tif" for DEM
+# and "BF.csv" for data points.
 dem_to_inference = {
     "Benin": "Benin",
     "Burkina": "BF",
@@ -146,19 +147,22 @@ dem_to_inference = {
     "Togo": "Togo",
 }
 
-# Main processing loop for each country
+# Main processing loop for each country.
 for training_num in range(len(dem_countries)):
     dem_country = dem_countries[training_num]
     inference_country = dem_to_inference[dem_country]
 
-    # Load training data
+    # Load training data.
     training_df = pd.read_excel(f"Training_data/{inference_country}.xlsx")
 
-    # Filter data based on date method (Meteorological data are available from 2002)
+    # Filter data based on date method (Meteorological data
+    # are available from 2002).
     if date_methods[training_num] == "datetime":
-        training_df["DATE"] = pd.to_datetime(training_df["DATE"], errors="coerce")
+        training_df["DATE"] = pd.to_datetime(
+            training_df["DATE"], errors="coerce")
         training_df = training_df[
-            (training_df["DATE"].dt.year > 2002) & (training_df["DATE"].dt.year < 2025)
+            (training_df["DATE"].dt.year > 2002) &
+            (training_df["DATE"].dt.year < 2025)
         ]
     elif date_methods[training_num] == "str":
         training_df = training_df[
@@ -174,18 +178,18 @@ for training_num in range(len(dem_countries)):
         width = src.width
         height = src.height
 
-    # Define maximum dimensions and padding to load arrays of reasonable size in RAM
+    # Define maximum dimensions and padding to load arrays of
+    # reasonable size in RAM.
     max_width = 5000
     max_height = 5000
     padding = 100
 
-    # Calculate the number of tiles
-    i_max, j_max = height // max_height + int(
-        height % max_height != 0
-    ), width // max_width + int(width % max_width != 0)
+    # Calculate the number of tiles.
+    i_max = height // max_height + int(height % max_height != 0)
+    j_max = width // max_width + int(width % max_width != 0)
     print(i_max, j_max)
 
-    # Initialize dictionaries for training points and borders
+    # Initialize dictionaries for training points and borders.
     training_points = {}
     training_borders = {}
 
@@ -215,23 +219,37 @@ for training_num in range(len(dem_countries)):
     for i in range(i_max):
         for j in range(j_max):
             print(f"Currently working country: {dem_country} and area: {i, j}")
-            if len(training_points[i, j]) == 0: #If no point in this tile
+            if len(training_points[i, j]) == 0:
+                # There is no point in this tile.
                 continue
-            for accumulation_threshold in [1500, 3000]: #Hyperparameter for acccumlation threshold to extract streams
-                for ridge_size in [30]: #Hyperparameter to identify the ridges (The higher this parameter is, the fewer points are identified as ridges)
-                    file_path = f"Topo_features_{dem_country}_{accumulation_threshold}_{ridge_size}_{i}_{j}.csv"
+
+            for accumulation_threshold in [1500, 3000]:
+                # Hyperparameter for acccumlation threshold to extract streams.
+                for ridge_size in [30]:
+                    # Hyperparameter to identify the ridges (The higher
+                    # this parameter is, the fewer points are identified as
+                    # ridges).
+
+                    file_path = (
+                        f"Topo_features_{dem_country}_{accumulation_threshold}"
+                        "_{ridge_size}_{i}_{j}.csv")
                     if os.path.exists(file_path):
                         print("The file already exists")
                         continue
+
                     row_min = max(0, i * max_height)
                     col_min = max(0, j * max_width)
                     row_max = min(height, row_min + max_height)
                     col_max = min(width, col_min + max_width)
 
                     # Load DEM data for the tile
-                    with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src:
+                    tifname = f"DEM/{dem_country}/{dem_country}.tif"
+                    with rasterio.open(tifname) as src:
                         transform = src.transform
-                        window = rasterio.windows.Window( #The window that loads only the tile with a padding around to remove border effects
+
+                        # The window that loads only the tile with a
+                        # padding around to remove border effects.
+                        window = rasterio.windows.Window(
                             max(0, col_min - padding),
                             max(0, row_min - padding),
                             (col_min - max(0, col_min - padding))
