@@ -12,6 +12,8 @@
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
+"""Création des features météorologiques."""
+
 import os
 import os.path as osp
 import pandas as pd
@@ -21,6 +23,25 @@ ee.Initialize(project="ee-azizagrebi4")
 
 from sahel import __datadir__
 from sahel.utils import read_obs_wl
+
+
+def duration(area_km2):
+    """
+    Constante de temps associée à différentes tailles de bassin versant.
+    """
+    if area_km2 < 100:
+        return 30
+    elif area_km2 < 500:
+        return 60
+    elif area_km2 < 1000:
+        return 90
+    elif area_km2 < 3000:
+        return 120
+    elif area_km2 < 5000:
+        return 150
+    elif area_km2 < 10000:
+        return 180
+    return 360
 
 
 # %%
@@ -56,49 +77,36 @@ print('Nbr. of WL observations :', len(training_df))
 
 # %%
 
-def duration(area_km2): # Constante de temps associée à différentes tailles de bassin versant
-    if area_km2 < 100:
-        return 30
-    elif area_km2 < 500:
-        return 60
-    elif area_km2 < 1000:
-        return 90
-    elif area_km2 < 3000 :
-        return 120
-    elif area_km2 < 5000:
-        return 150
-    elif area_km2 < 10000:
-        return 180
-    return 360
+# Hydrobassin qui permet de délimiter les bassins
+# versants (niveau 12, i.e. résolution max)
+hydrobasins = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_12')
 
+# Dataset pour la pluviométrie.
+chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
 
-# In[ ]:
-
-
-# On crée ici les features météorologiques
-
-hydrobasins = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_12') # Hydrobassin qui permet de délimiter les bassins versants (niveau 12, i.e. résolution max)
-chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY") # Dataset pour la pluviométrie
-modis_ndvi = ee.ImageCollection('MODIS/006/MOD13A1').select("NDVI") # Dataset pour le NDVI
+# Dataset pour le NDVI
+modis_ndvi = ee.ImageCollection('MODIS/006/MOD13A1').select("NDVI")
 
 SAVE_PATH = f"Meteo_features_{dem_country}_time_series.csv"
 
+
 def get_time_series(lon, lat, date_str):
-    if type(date_str)==str:
+    if type(date_str) is str:
         try:
             date = datetime.strptime(date_str, "%Y-%m-%d")
-        except:
+        except Exception:
             date = datetime.strptime(date_str, "%d/%m/%Y")
     else:
         date = date_str
 
     start_date = date - timedelta(days=150)
-    start_date_str, end_date_str = start_date.strftime('%Y-%m-%d'), date.strftime('%Y-%m-%d')
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = date.strftime('%Y-%m-%d')
 
     point = ee.Geometry.Point([lon, lat])
     bassin = hydrobasins.filterBounds(point).first()
     if bassin is None:
-        return None, None 
+        return None, None
 
     bassin_geom = bassin.geometry()
 
@@ -114,8 +122,14 @@ def get_time_series(lon, lat, date_str):
         ).get("precipitation")
         return ee.Feature(None, {"date": date, "precipitation": mean_rainfall})
 
-    rainfall_series = chirps_filtered.map(extract_rainfall).aggregate_array("date").getInfo()
-    rainfall_values = chirps_filtered.map(extract_rainfall).aggregate_array("precipitation").getInfo()
+    rainfall_series = (
+        chirps_filtered.map(extract_rainfall)
+        .aggregate_array("date")
+        .getInfo())
+    rainfall_values = (
+        chirps_filtered.map(extract_rainfall)
+        .aggregate_array("precipitation")
+        .getInfo())
 
     ndvi_filtered = modis_ndvi.filterDate(start_date_str, end_date_str)
 
@@ -129,16 +143,27 @@ def get_time_series(lon, lat, date_str):
         ).get("NDVI")
         return ee.Feature(None, {"date": date, "NDVI": mean_ndvi})
 
-    ndvi_series = ndvi_filtered.map(extract_ndvi).aggregate_array("date").getInfo()
-    ndvi_values = ndvi_filtered.map(extract_ndvi).aggregate_array("NDVI").getInfo()
+    ndvi_series = (
+        ndvi_filtered.map(extract_ndvi)
+        .aggregate_array("date")
+        .getInfo())
+    ndvi_values = (
+        ndvi_filtered.map(extract_ndvi)
+        .aggregate_array("NDVI")
+        .getInfo())
 
     ndvi_values = [v * 0.0001 if v is not None else None for v in ndvi_values]
 
-    return list(zip(rainfall_series, rainfall_values)), list(zip(ndvi_series, ndvi_values))
+    return (list(zip(rainfall_series, rainfall_values)),
+            list(zip(ndvi_series, ndvi_values)))
 
-if os.path.exists(SAVE_PATH):
+
+if osp.exists(SAVE_PATH):
     training_df = pd.read_csv(SAVE_PATH, index_col=0)
-    start_index = training_df[training_df["ndvi_series"]==training_df["ndvi_series"]].index[-1]
+    start_index = (
+        training_df[training_df["ndvi_series"] ==
+                    training_df["ndvi_series"]].index[-1]
+        )
     print(f"Reprise depuis l'index {start_index}")
 else:
     training_df["precipitation_series"] = None
@@ -147,16 +172,18 @@ else:
 
 for k, i in enumerate(training_df.index):
     if i > start_index:
-        lon, lat, date_str = training_df.loc[i, "LON"], training_df.loc[i, "LAT"], training_df.loc[i, "DATE"]
-        
-        print(f"Traitement de l'index {k}/{len(training_df)} : LON={lon}, LAT={lat}, DATE={date_str}")
+        lon = training_df.loc[i, "LON"]
+        lat = training_df.loc[i, "LAT"]
+        date_str = training_df.loc[i, "DATE"]
+
+        print(f"Traitement de l'index {k}/{len(training_df)} : "
+              f"LON={lon}, LAT={lat}, DATE={date_str}")
 
         precipitation_series, ndvi_series = get_time_series(lon, lat, date_str)
-        
+
         training_df.at[i, "precipitation_series"] = str(precipitation_series)
         training_df.at[i, "ndvi_series"] = str(ndvi_series)
 
         if k % 10 == 0 or k == len(training_df) - 1:
             training_df.to_csv(SAVE_PATH, index=True)
             print(f"Sauvegarde à l'index {i}")
-
