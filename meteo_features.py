@@ -1,18 +1,29 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
 
 import os
+import os.path as osp
 import pandas as pd
 from datetime import datetime, timedelta
-import ee # L'API de Google Earth Engine
-ee.Initialize(project="ee-azizagrebi4") 
+import ee  # L'API de Google Earth Engine
+ee.Initialize(project="ee-azizagrebi4")
+
+from sahel import __datadir__
+from sahel.utils import read_obs_wl
 
 
-# In[ ]:
-
+# %%
 
 dem_countries = ["Benin", "Burkina", "Guinee", "Mali", "Niger", "Togo"]
 date_methods = ["datetime", "str", "datetime", "datetime", "datetime", "int"]
@@ -30,19 +41,20 @@ training_num = 3
 dem_country = dem_countries[training_num]
 inference_country = dem_to_inference[dem_country]
 
-training_df = pd.read_excel(f"Training_data/{inference_country}.xlsx")
-if date_methods[training_num] == "datetime": # On filtre ici les dates supérieures à 2002 (car pas de données sur ee avant ça)
-    training_df["DATE"] = pd.to_datetime(training_df["DATE"], errors="coerce")
-    training_df = training_df[(training_df["DATE"].dt.year > 2002) & (training_df["DATE"].dt.year < 2025)]
-elif date_methods[training_num] == "str":
-    training_df = training_df[training_df["DATE"].apply(lambda row: int(row.split("/")[2])) > 2002]
-else:
-    training_df = training_df[training_df["DATE"] > 2002]
-training_df.shape
+
+# %%
+training_df = read_obs_wl(osp.join(__datadir__, f'{dem_country}.xlsx'))
+
+# On filtre les dates supérieures à 2002 (car pas de données sur ee avant ça).
+mask = ((training_df['DATE'].dt.year > 2002) &
+        (training_df['DATE'].dt.year < 2025))
+
+training_df = training_df.loc[mask, :]
+
+print('Nbr. of WL observations :', len(training_df))
 
 
-# In[ ]:
-
+# %%
 
 def duration(area_km2): # Constante de temps associée à différentes tailles de bassin versant
     if area_km2 < 100:
