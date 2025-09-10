@@ -1,0 +1,12 @@
+numpy
+pandas
+openpyxl
+scipy
+scikit-image
+scikit-learn
+xgboost
+matplotlib
+seaborn
+distinctipy
+h5py>=3
+earthengine-api
