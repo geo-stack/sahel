@@ -1,15 +1,51 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Aug 21 09:39:42 2025
-@author: User
-"""
+# =============================================================================
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# https://github.com/geo-stack/sahel_water_table_ml
+# =============================================================================
 import pandas as pd
 import re
 import matplotlib.pyplot as plt
 from datetime import datetime
 
 
-def normalize_date(val):
+def read_obs_wl(filename) -> pd.DataFrame:
+    """
+    Read water level observations from an Excel file and preprocess
+    the data.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the Excel file containing water level observations.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ['ID', 'LON', 'LAT', 'DATE', 'NS'] and
+        cleaned, parsed data.
+    """
+    df = pd.read_excel(
+        filename,
+        dtype={'DATE': str, 'NS': float, 'LON': float, 'LAT': float,
+               'ID': str, 'OMES_ID': str, 'No_Ouvrage': str, 'CODE_OUVRA': str}
+        )
+    df.columns = ['ID', 'LON', 'LAT', 'DATE', 'NS']
+
+    df['DATE'] = df['DATE'].apply(_normalize_date)
+    df['DATE'] = pd.to_datetime(df['DATE'])
+
+    df = df.dropna()
+
+    return df
+
+
+def _normalize_date(val) -> datetime:
+    """Normalize various date string formats to a datetime object."""
     if val == '00:00:00' or val.strip() == '':
         return pd.NaT
 
@@ -39,32 +75,33 @@ def normalize_date(val):
     raise ValueError(f'Cannot parse date with value={val}')
 
 
-def read_obs_wl(filename):
-    df = pd.read_excel(
-        filename,
-        dtype={'DATE': str, 'NS': float, 'LON': float, 'LAT': float,
-               'ID': str, 'OMES_ID': str, 'No_Ouvrage': str, 'CODE_OUVRA': str}
-        )
-    df.columns = ['ID', 'LON', 'LAT', 'DATE', 'NS']
+def plot_wl_hist(df: pd.DataFrame, country: str):
+    """
+    Plot a histogram of water level observation counts by decade.
 
-    df['DATE'] = df['DATE'].apply(normalize_date)
-    df['DATE'] = pd.to_datetime(df['DATE'])
+    This function generates a histogram of the number of water level (WL)
+    observations per decade based on the 'DATE' column of the DataFrame.
 
-    df = df.dropna()
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing a 'DATE' column of datetime type.
+    country : str
+        Country name to display in the title of the plot.
 
-    return df
-
-
-def plot_wl_hist(df):
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated histogram figure.
+    """
     fig, ax = plt.subplots(figsize=(6, 4))
 
     bins = list(range(1950, 2030, 10))
 
     counts, bins, patches = ax.hist(df['DATE'].dt.year, bins, rwidth=0.8)
 
-    # Annotate each bar
+    # Annotate each bar.
     for count, bin_left, patch in zip(counts, bins, patches):
-        # Place the text at the center of the bar
         ax.text(
             patch.get_x() + (patch.get_width()/2),
             count,
@@ -73,6 +110,7 @@ def plot_wl_hist(df):
             va='bottom',
         )
 
+    # Add a little bit of space at the top of the graph for the text.
     ylim = ax.get_ylim()
     height_pixels = ax.get_window_extent().height
     data_per_pixel = (ylim[1] - ylim[0]) / height_pixels
@@ -92,9 +130,10 @@ def plot_wl_hist(df):
     return fig
 
 
-countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
-
-for country in countries:
-    filename = f"D:/Projets/sahel_water_table_ml/data/data/{country}.xlsx"
-    df = read_obs_wl(filename)
-    plot_wl_hist(df)
+if __name__ == '__main__':
+    import os.path as osp
+    countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
+    for country in countries:
+        filename = osp.join(__file__, 'data', 'data', f'{country}.xlsx')
+        df = read_obs_wl(filename)
+        fig = plot_wl_hist(df)
