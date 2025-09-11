@@ -1,17 +1,30 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
 
 import os
+import os.path as osp
 import pandas as pd
 from datetime import datetime, timedelta
 import ee # L'API de Google Earth Engine
-ee.Initialize(project="ee-azizagrebi4") 
+ee.Initialize(project="ee-azizagrebi4")
+
+# Local imports.
+from sahel import __datadir__
+from sahel.utils import read_obs_wl
 
 
-# In[ ]:
+# %%
 
 
 dem_countries = ["Benin", "Burkina", "Guinee", "Mali", "Niger", "Togo"]
@@ -30,15 +43,15 @@ training_num = 3
 dem_country = dem_countries[training_num]
 inference_country = dem_to_inference[dem_country]
 
-training_df = pd.read_excel(f"Training_data/{inference_country}.xlsx")
-if date_methods[training_num] == "datetime": # On filtre ici les dates supérieures à 2002 (car pas de données sur ee avant ça)
-    training_df["DATE"] = pd.to_datetime(training_df["DATE"], errors="coerce")
-    training_df = training_df[(training_df["DATE"].dt.year > 2002) & (training_df["DATE"].dt.year < 2025)]
-elif date_methods[training_num] == "str":
-    training_df = training_df[training_df["DATE"].apply(lambda row: int(row.split("/")[2])) > 2002]
-else:
-    training_df = training_df[training_df["DATE"] > 2002]
-training_df.shape
+training_df = read_obs_wl(osp.join(__datadir__, 'data', f'{dem_country}.xlsx'))
+
+# On filtre les dates supérieures à 2002 (car pas de données sur ee avant ça).
+mask = ((training_df['DATE'].dt.year > 2002) &
+        (training_df['DATE'].dt.year < 2025))
+
+training_df = training_df.loc[mask, :]
+
+print('Nbr. of WL observations :', len(training_df))
 
 
 # In[ ]:
@@ -86,7 +99,7 @@ def get_time_series(lon, lat, date_str):
     point = ee.Geometry.Point([lon, lat])
     bassin = hydrobasins.filterBounds(point).first()
     if bassin is None:
-        return None, None 
+        return None, None
 
     bassin_geom = bassin.geometry()
 
@@ -136,11 +149,11 @@ else:
 for k, i in enumerate(training_df.index):
     if i > start_index:
         lon, lat, date_str = training_df.loc[i, "LON"], training_df.loc[i, "LAT"], training_df.loc[i, "DATE"]
-        
+
         print(f"Traitement de l'index {k}/{len(training_df)} : LON={lon}, LAT={lat}, DATE={date_str}")
 
         precipitation_series, ndvi_series = get_time_series(lon, lat, date_str)
-        
+
         training_df.at[i, "precipitation_series"] = str(precipitation_series)
         training_df.at[i, "ndvi_series"] = str(ndvi_series)
 
