@@ -124,12 +124,56 @@ for file in files:
     else:
         print(f"Downloaded {file} sucessfully.")
 
+
+# %% Download HydroATLAS layers
+
+# HydroATLAS is a global, sub-basin hydrology dataset providing physical,
+# ecological, climatic and socio-economic attributes for river basins and
+# catchments at high resolution. It offers standardized basin geometries
+# (HydroBASINS) and >700 attributes (e.g. flow accumulation, land cover,
+# precipitation) for multiple nested basin levels to support water resources
+# management, modeling, and environmental assessment.
+
+# Here we download all three layers of HydroATLAS (BasinATLAS, RiverATLAS,
+# and LakeATLAS) in geodatabase format.
+
+# See https://www.hydrosheds.org/products/hydrobasins.
+
+dest_folder = osp.join(__datadir__, 'hydro_atlas')
+os.makedirs(dest_folder, exist_ok=True)
+
+urls = {'BasinATLAS': 'https://figshare.com/ndownloader/files/20082137',
+        'RiverATLAS': 'https://figshare.com/ndownloader/files/20087321',
+        'LakeATLAS': 'https://figshare.com/ndownloader/files/35959544'}
+
+for key, url in urls.items():
+
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+
+        # Get the filename from the response headers.
+        cd = r.headers.get("Content-Disposition", "")
+        filename = cd.split("filename=")[-1].strip('"')
+
+        local_path = osp.join(dest_folder, filename)
+
+        # Skip if already downloaded.
+        if osp.exists(local_path):
+            print(f"Skipping {filename}, already exists.")
+            continue
+
+        print(f"Downloading {filename}...")
+        with open(local_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"Downloaded {file} sucessfully.")
+
+
+# %%
 # Hydrobassin qui permet de délimiter les bassins
 # versants (niveau 12, i.e. résolution max)
+#
 hydrobasins = ee.FeatureCollection('WWF/HydroSHEDS/v1/Basins/hybas_12')
-
-# Dataset pour la pluviométrie.
-chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
 
 # Dataset pour le NDVI
 modis_ndvi = ee.ImageCollection('MODIS/006/MOD13A1').select("NDVI")
