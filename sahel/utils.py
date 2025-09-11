@@ -132,9 +132,13 @@ def plot_wl_hist(df: pd.DataFrame, country: str):
 
 
 if __name__ == '__main__':
+    from sahel import __datadir__
     import os.path as osp
     countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
     for country in countries:
-        filename = osp.join(__file__, 'data', 'data', f'{country}.xlsx')
+        filename = osp.join(__datadir__, 'data', f'{country}.xlsx')
         df = read_obs_wl(filename)
-        fig = plot_wl_hist(df)
+        fig = plot_wl_hist(df, country)
+
+        filepath = osp.join(__datadir__, 'data', 'wl_obs_count_{country}.png')
+        fig.savefig(filepath, dpi=220)
