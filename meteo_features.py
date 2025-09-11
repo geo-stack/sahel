@@ -14,13 +14,17 @@
 
 """Création des features météorologiques."""
 
+# Standard imports.
 import os
 import os.path as osp
-import pandas as pd
 from datetime import datetime, timedelta
-import ee  # L'API de Google Earth Engine
-ee.Initialize(project="ee-azizagrebi4")
 
+# Third party imports.
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+
+# Local imports.
 from sahel import __datadir__
 from sahel.utils import read_obs_wl
 
@@ -44,8 +48,6 @@ def duration(area_km2):
     return 360
 
 
-# %%
-
 dem_countries = ["Benin", "Burkina", "Guinee", "Mali", "Niger", "Togo"]
 date_methods = ["datetime", "str", "datetime", "datetime", "datetime", "int"]
 
@@ -64,7 +66,7 @@ inference_country = dem_to_inference[dem_country]
 
 
 # %%
-training_df = read_obs_wl(osp.join(__datadir__, f'{dem_country}.xlsx'))
+training_df = read_obs_wl(osp.join(__datadir__, 'data', f'{dem_country}.xlsx'))
 
 # On filtre les dates supérieures à 2002 (car pas de données sur ee avant ça).
 mask = ((training_df['DATE'].dt.year > 2002) &
@@ -75,7 +77,52 @@ training_df = training_df.loc[mask, :]
 print('Nbr. of WL observations :', len(training_df))
 
 
-# %%
+# %% Download Monthly Precip Data
+
+# CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data)
+# is a gridded rainfall dataset providing daily, pentadal, and monthly
+# precipitation estimates at ~0.05° resolution, starting from 1981. It
+# combines satellite imagery with in-situ station data to support climate
+# and drought monitoring applications, especially in data-scarce regions.
+
+# Here we download all monthly CHIRPS precipitation GeoTIFF files for the
+# entire African continent from 1981 to today (one .tif file per month) from
+# the official UCSB CHC data server.
+
+# See https://www.chc.ucsb.edu/data/chirps.
+
+dest_folder = osp.join(__datadir__, 'chirps')
+os.makedirs(dest_folder, exist_ok=True)
+
+base_url = (
+    "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/africa/tifs/"
+    )
+
+# Get the list of monthly tif files available for download.
+resp = requests.get(base_url)
+resp.raise_for_status()
+
+soup = BeautifulSoup(resp.text, "html.parser")
+files = [a['href'] for a in soup.find_all("a") if a['href'].endswith(".tif")]
+
+for file in files:
+    file_url = base_url + file
+    local_path = osp.join(dest_folder, file)
+
+    # Skip if already downloaded.
+    if osp.exists(local_path):
+        print(f"Skipping {file}, already exists.")
+        continue
+
+    try:
+        resp = requests.get(file_url, stream=False, timeout=60)
+        resp.raise_for_status()
+        with open(local_path, "wb") as fp:
+            fp.write(resp.content)
+    except Exception as e:
+        print(f"Could not download {file}: {e}")
+    else:
+        print(f"Downloaded {file} sucessfully.")
 
 # Hydrobassin qui permet de délimiter les bassins
 # versants (niveau 12, i.e. résolution max)
