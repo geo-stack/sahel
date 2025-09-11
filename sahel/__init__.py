@@ -10,4 +10,4 @@
 # =============================================================================
 
 import os.path as osp
-__datadir__ = osp.join(osp.dirname(osp.dirname(__file__)), 'data', 'data')
+__datadir__ = osp.join(osp.dirname(osp.dirname(__file__)), 'data')
