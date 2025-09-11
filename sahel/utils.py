@@ -140,5 +140,5 @@ if __name__ == '__main__':
         df = read_obs_wl(filename)
         fig = plot_wl_hist(df, country)
 
-        filepath = osp.join(__datadir__, 'data', 'wl_obs_count_{country}.png')
+        filepath = osp.join(__datadir__, 'data', f'wl_obs_count_{country}.png')
         fig.savefig(filepath, dpi=220)
