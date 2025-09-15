@@ -1,80 +1,30 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# Copyright 2024 (C) Aziz Agrebi
 # Copyright (C) Les solutions géostack, Inc
 #
 # This file was produced as part of a research project conducted for
 # The World Bank Group and is licensed under the terms of the MIT license.
 #
-# Originally developed by Aziz Agrebi as part of his master's project.
-#
 # For inquiries, contact: info@geostack.ca
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
-"""Création des features météorologiques."""
+"""Download climatic data ."""
 
 # Standard imports.
 import os
 import os.path as osp
-from datetime import datetime, timedelta
 
 # Third party imports.
+import numpy as np
+import netCDF4
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
+import rasterio
+from rasterio.transform import from_origin
 
 # Local imports.
 from sahel import __datadir__
-from sahel.utils import read_obs_wl
-
-
-def duration(area_km2):
-    """
-    Constante de temps associée à différentes tailles de bassin versant.
-    """
-    if area_km2 < 100:
-        return 30
-    elif area_km2 < 500:
-        return 60
-    elif area_km2 < 1000:
-        return 90
-    elif area_km2 < 3000:
-        return 120
-    elif area_km2 < 5000:
-        return 150
-    elif area_km2 < 10000:
-        return 180
-    return 360
-
-
-dem_countries = ["Benin", "Burkina", "Guinee", "Mali", "Niger", "Togo"]
-date_methods = ["datetime", "str", "datetime", "datetime", "datetime", "int"]
-
-dem_to_inference = {
-    "Benin": "Benin",
-    "Burkina": "BF",
-    "Guinee": "gui",
-    "Mali": "Mali",
-    "Niger": "Niger",
-    "Togo": "Togo",
-}
-
-training_num = 3
-dem_country = dem_countries[training_num]
-inference_country = dem_to_inference[dem_country]
-
-
-# %%
-training_df = read_obs_wl(osp.join(__datadir__, 'data', f'{dem_country}.xlsx'))
-
-# On filtre les dates supérieures à 2002 (car pas de données sur ee avant ça).
-mask = ((training_df['DATE'].dt.year > 2002) &
-        (training_df['DATE'].dt.year < 2025))
-
-training_df = training_df.loc[mask, :]
-
-print('Nbr. of WL observations :', len(training_df))
 
 
 # %% Download Monthly Precip Data
@@ -173,127 +123,71 @@ for key, url in urls.items():
 
 # MODIS NDVI (MOD13A1) data from NASA EarthData is only available since the
 # year 2000 because the MODIS sensors aboard Terra and Aqua satellites were
-# launched in late 1999 and 2002, respectively.
+# launched in late 1999 and 2002, respectively. Therefore we are using
+# NDVI data from the NOAA Climate Data Record (CDR) instead.
 
+# The NOAA Climate Data Record (CDR) of the Normalized Difference Vegetation
+# Index (NDVI) provides a long-term, consistent record of global vegetation
+# greenness derived from AVHRR satellite observations, spanning from 1981 to
+# present.
 
-import requests
-from bs4 import BeautifulSoup
+# see: https://www.ncei.noaa.gov/products/climate-data-records
 
-base_url = ("https://www.ncei.noaa.gov/data/land-normalized-difference-"
-            "vegetation-index/access/")
-resp = requests.get(url)
-resp.raise_for_status()
+from sahel.dataio.noaa import (
+    download_noaa_ndvi_daily, stack_daily_ndvi_to_month,
+    calc_ndvi_monthly_stats
+    )
 
-soup = BeautifulSoup(resp.text, "html.parser")
-years = [a.text.strip('/') for a in soup.find_all("a") if
-         a.text.strip('/').isdigit()]
+year = 1981
 
-print("Available years:", years)
+base_datadir = osp.join(__datadir__, 'noaa_ndvi')
+daily_datadir = osp.join(base_datadir, 'daily', str(year))
 
+download_noaa_ndvi_daily(year, daily_datadir)
 
+lat_min = -40.0
+lat_max = 40.0
+lon_min = -20.0
+lon_max = 55.0
 
-# %%
-# https://www.earthdata.nasa.gov/data/catalog/lpcloud-mod13a1-061
-# Dataset pour le NDVI (Normalized Difference Vegetation Index)
-modis_ndvi = ee.ImageCollection('MODIS/006/MOD13A1').select("NDVI")
+for month in range(1, 13):
 
-SAVE_PATH = f"Meteo_features_{dem_country}_time_series.csv"
-
-
-def get_time_series(lon, lat, date_str):
-    if type(date_str) is str:
-        try:
-            date = datetime.strptime(date_str, "%Y-%m-%d")
-        except Exception:
-            date = datetime.strptime(date_str, "%d/%m/%Y")
-    else:
-        date = date_str
-
-    start_date = date - timedelta(days=150)
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = date.strftime('%Y-%m-%d')
-
-    point = ee.Geometry.Point([lon, lat])
-    bassin = hydrobasins.filterBounds(point).first()
-    if bassin is None:
-        return None, None
-
-    bassin_geom = bassin.geometry()
-
-    chirps_filtered = chirps.filterDate(start_date_str, end_date_str)
-
-    def extract_rainfall(img):
-        date = ee.Date(img.date()).format("YYYY-MM-dd")
-        mean_rainfall = img.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=bassin_geom,
-            scale=5000,
-            maxPixels=1e9
-        ).get("precipitation")
-        return ee.Feature(None, {"date": date, "precipitation": mean_rainfall})
-
-    rainfall_series = (
-        chirps_filtered.map(extract_rainfall)
-        .aggregate_array("date")
-        .getInfo())
-    rainfall_values = (
-        chirps_filtered.map(extract_rainfall)
-        .aggregate_array("precipitation")
-        .getInfo())
-
-    ndvi_filtered = modis_ndvi.filterDate(start_date_str, end_date_str)
-
-    def extract_ndvi(img):
-        date = ee.Date(img.date()).format("YYYY-MM-dd")
-        mean_ndvi = img.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=bassin_geom,
-            scale=500,
-            maxPixels=1e9
-        ).get("NDVI")
-        return ee.Feature(None, {"date": date, "NDVI": mean_ndvi})
-
-    ndvi_series = (
-        ndvi_filtered.map(extract_ndvi)
-        .aggregate_array("date")
-        .getInfo())
-    ndvi_values = (
-        ndvi_filtered.map(extract_ndvi)
-        .aggregate_array("NDVI")
-        .getInfo())
-
-    ndvi_values = [v * 0.0001 if v is not None else None for v in ndvi_values]
-
-    return (list(zip(rainfall_series, rainfall_values)),
-            list(zip(ndvi_series, ndvi_values)))
-
-
-if osp.exists(SAVE_PATH):
-    training_df = pd.read_csv(SAVE_PATH, index_col=0)
-    start_index = (
-        training_df[training_df["ndvi_series"] ==
-                    training_df["ndvi_series"]].index[-1]
+    print(f"Processing daily NDVI data for month {month} of year {year}...")
+    ndvi_mth = stack_daily_ndvi_to_month(
+        year=year, month=month, datadir=daily_datadir,
+        lat_min=lat_min, lat_max=lat_max,
+        lon_min=lon_min, lon_max=lon_max
         )
-    print(f"Reprise depuis l'index {start_index}")
-else:
-    training_df["precipitation_series"] = None
-    training_df["ndvi_series"] = None
-    start_index = -1
 
-for k, i in enumerate(training_df.index):
-    if i > start_index:
-        lon = training_df.loc[i, "LON"]
-        lat = training_df.loc[i, "LAT"]
-        date_str = training_df.loc[i, "DATE"]
+    if ndvi_mth is None:
+        print(f"There is no daily NDVI data for month {month} of "
+              f"year {year}, skipping.")
+        continue
 
-        print(f"Traitement de l'index {k}/{len(training_df)} : "
-              f"LON={lon}, LAT={lat}, DATE={date_str}")
+    print(f"Calculating monthly NDVI stats for "
+          f"month {month} of year {year}...")
+    mth_stats, band_names = calc_ndvi_monthly_stats(ndvi_mth)
 
-        precipitation_series, ndvi_series = get_time_series(lon, lat, date_str)
+    print(f"Write monthly stats to GeoTIFF for "
+          f"month {month} of year {year}...")
 
-        training_df.at[i, "precipitation_series"] = str(precipitation_series)
-        training_df.at[i, "ndvi_series"] = str(ndvi_series)
+    filename = f'noaa_ndvi_monthly_{year}_{month:0.2d}.tif'
+    filepath = osp.join(__datadir__, 'noaa_ndvi', filename)
 
-        if k % 10 == 0 or k == len(training_df) - 1:
-            training_df.to_csv(SAVE_PATH, index=True)
-            print(f"Sauvegarde à l'index {i}")
+    with rasterio.open(
+        filepath,
+        'w',
+        driver='GTiff',
+        height=mth_stats.shape[1],
+        width=mth_stats.shape[2],
+        count=mth_stats.shape[0],
+        dtype=mth_stats.dtype,
+        crs="EPSG:4326",  # lat/lon grids (WGS84)
+        transform=from_origin(lon_min, lat_max, 0.05, 0.05),
+        compress='zstd'
+    ) as dst:
+        for i, (band_name, band_values) in enumerate(mth_stats.items):
+            dst.write(band_values, i + 1)
+            dst.set_band_description(i + 1, band_name)
+
+    break
