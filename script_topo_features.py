@@ -130,30 +130,20 @@ def new_bresenham_line(row0, col0, row1, col1, thickness=1):
     return list(set(points))
 
 
+# %%
 # List of countries and corresponding date methods.
 dem_countries = ["Benin", "Burkina", "Guinee"]
 
 # Indicates the type of the column "DATE" in the csv.
 date_methods = ["datetime", "str", "datetime"]
 
-# Mapping of countries to inference names i.e. "Benin.tif" for DEM
-# and "BF.csv" for data points.
-dem_to_inference = {
-    "Benin": "Benin",
-    "Burkina": "BF",
-    "Guinee": "gui",
-    "Mali": "Mali",
-    "Niger": "Niger",
-    "Togo": "Togo",
-}
 
 # Main processing loop for each country.
 for training_num in range(len(dem_countries)):
     dem_country = dem_countries[training_num]
-    inference_country = dem_to_inference[dem_country]
 
     # Load training data.
-    training_df = pd.read_excel(f"Training_data/{inference_country}.xlsx")
+    training_df = pd.read_excel(f"Training_data/{dem_country}.xlsx")
 
     # Filter data based on date method (Meteorological data
     # are available from 2002).
@@ -166,7 +156,9 @@ for training_num in range(len(dem_countries)):
         ]
     elif date_methods[training_num] == "str":
         training_df = training_df[
-            training_df["DATE"].apply(lambda row: int(row.split("/")[2])) > 2002
+            training_df["DATE"].apply(
+                lambda row: int(row.split("/")[2])
+                ) > 2002
         ]
     else:
         training_df = training_df[training_df["DATE"] > 2002]
