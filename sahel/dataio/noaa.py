@@ -20,8 +20,6 @@ import numpy as np
 import netCDF4
 import requests
 from bs4 import BeautifulSoup
-import rasterio
-from rasterio.transform import from_origin
 
 
 BASE_NOAA_NDVI_URL = (
@@ -44,8 +42,9 @@ def get_noaa_ndvi_avail_years() -> list[int]:
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    years = [a.text.strip('/') for a in soup.find_all("a") if
+    years = [int(a.text.strip('/')) for a in soup.find_all("a") if
              a.text.strip('/').isdigit()]
+
     return years
 
 
@@ -142,7 +141,6 @@ def stack_daily_ndvi_to_month(
     for day in range(1, 32):
         for filename in filenames:
             if f"{year}{month:02d}{day:02d}" in filename:
-                print('day:', day)
                 dset = netCDF4.Dataset(osp.join(datadir, filename))
                 if idx_x is None:
                     lat = np.array(dset['latitude'])
@@ -155,7 +153,68 @@ def stack_daily_ndvi_to_month(
                     np.array(dset['NDVI'])[:, idx_y, :][:, :, idx_x].copy()
                     )
 
+    if len(arrays) == 0:
+        return None
+
     ndvi_mth = np.concatenate(arrays)
     ndvi_mth[ndvi_mth == -9999] = np.nan
 
     return ndvi_mth
+
+
+def calc_ndvi_monthly_stats(ndvi_mth: np.array) -> dict:
+    """
+    Compute per-pixel monthly NDVI statistics.
+
+    Calculates a set of summary statistics (min, max, mean, std, sum, and
+    percentiles) for each pixel over the time (first) axis of the input
+    NDVI array. All statistics are computed ignoring NaN values.
+    For pixels where all values are NaN, outputs remain uninitialized.
+
+    Parameters
+    ----------
+    ndvi_mth : np.ndarray
+        A 3D array of NDVI values with shape (time, height, width).
+        The first axis is assumed to be time (e.g., days in a month).
+
+    Returns
+    -------
+    mth_stats : np.ndarray
+        A 3D array of computed statistics with shape (10, height, width).
+        The first dimension corresponds to the following statistics, in
+        order: ['min', 'max', 'mean', 'std', 'sum',
+                'q10', 'q25', 'q50', 'q75', 'q90'].
+    """
+    ny, nx = ndvi_mth.shape[1], ndvi_mth.shape[2]
+    is_null_sum = np.sum(np.isnan(ndvi_mth), axis=0)
+    mask_yx = is_null_sum != ndvi_mth.shape[0]
+
+    mth_stats = {}
+
+    mth_stats['min'] = np.empty((ny, nx), dtype=np.float32)
+    mth_stats['min'][mask_yx] = np.nanmin(
+        ndvi_mth[:, mask_yx], axis=0).astype(np.float32)
+
+    mth_stats['max'] = np.empty((ny, nx), dtype=np.float32)
+    mth_stats['max'][mask_yx] = np.nanmax(
+        ndvi_mth[:, mask_yx], axis=0).astype(np.float32)
+
+    mth_stats['mean'] = np.empty((ny, nx), dtype=np.float32)
+    mth_stats['mean'][mask_yx] = np.nanmean(
+        ndvi_mth[:, mask_yx], axis=0).astype(np.float32)
+
+    mth_stats['std'] = np.empty((ny, nx), dtype=np.float32)
+    mth_stats['std'][mask_yx] = np.nanstd(
+        ndvi_mth[:, mask_yx], axis=0).astype(np.float32)
+
+    mth_stats['sum'] = np.empty((ny, nx), dtype=np.float32)
+    mth_stats['sum'][mask_yx] = np.nansum(
+        ndvi_mth[:, mask_yx], axis=0).astype(np.float32)
+
+    q = [10, 25, 50, 75, 90]
+    ndvi_q = np.nanpercentile(ndvi_mth[:, mask_yx], q, axis=0)
+    for i, qi in enumerate(q):
+        mth_stats[f'{q}{i}'] = np.empty((ny, nx), dtype=np.float32)
+        mth_stats[f'{q}{i}'][mask_yx] = ndvi_q[i]
+
+    return mth_stats
