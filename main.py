@@ -1,13 +1,34 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
+
+
+# Standard imports
 import os
+import os.path as osp
+import pickle
+
+# Third party imports
 import rasterio
 import numpy as np
 from pysheds.grid import Grid
+from affine import Affine
 import pandas as pd
-import cv2
-from whitebox_workflows import WbEnvironment
+# import cv2
+import whitebox_workflows as wbw
+# from whitebox_workflows import WbEnvironment
 from scipy.ndimage import label
 from skimage.measure import regionprops
-import pickle
 import glob
 
 
