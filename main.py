@@ -22,22 +22,15 @@ import pickle
 import rasterio
 import numpy as np
 from pysheds.grid import Grid
-from affine import Affine
 import pandas as pd
-# import cv2
+import cv2
 import whitebox_workflows as wbw
-# from whitebox_workflows import WbEnvironment
 from scipy.ndimage import label
 from skimage.measure import regionprops
 import glob
 
-
-def list_folders(directory):
-    return [
-        name
-        for name in os.listdir(directory)
-        if os.path.isdir(os.path.join(directory, name))
-    ]
+# Local imports
+from sahel import __datadir__
 
 
 def bresenham_line(x0, y0, x1, y1):
@@ -63,12 +56,6 @@ def bresenham_line(x0, y0, x1, y1):
     return points
 
 
-def convert_indices_to_coords(col, row, grid_affine):
-    lon = grid_affine[0] * col + grid.affine[2]
-    lat = grid_affine[4] * row + grid_affine[5]
-    return lon, lat
-
-
 def convert_coord_to_indices(lon, lat, grid_affine):
     col = round((lon - grid_affine[2]) / grid_affine[0])
     row = round((lat - grid_affine[5]) / grid_affine[4])
@@ -81,22 +68,71 @@ sigma = 1.0
 threshold = 1500
 size = 200
 
-with open("./models/model.pkl", "rb") as file:
-    model = pickle.load(file)
+temp_folder = osp.join(__datadir__, 'results', 'temp')
+os.makedirs(temp_folder, exist_ok=True)
 
-folder = "./data/results/temp/"
-csv_files = [f for f in os.listdir(folder) if f.endswith('.csv')]
-map_folder = "./data/results/"
-map_csv_files = [f for f in os.listdir(folder) if f.endswith('.csv')]
-directory_path = "./data/dem/"
-countries = list_folders(directory_path)
+csv_files = [f for f in os.listdir(temp_folder) if f.endswith('.csv')]
+
+map_folder = osp.join(__datadir__, 'results')
+map_csv_files = [f for f in os.listdir(map_folder) if f.endswith('.csv')]
+
+dem_path = osp.join(__datadir__, 'dem')
+
+# The rainfedcropland rasters (.tif) of the areas where we want to perform
+# groundwater table depth calculations, for the 6 countries of interest:
+# Burkina Faso, Chad, Mali, Mauritania, Niger, and Senegal. These rasters
+# are aligned with the SRTM 30 m. The expected calculation is the groundwater
+# table level at the center of the activated pixels.
+
+countries = ['Burkina', 'Tchad', 'Mali', 'Mauritania', 'Niger', 'Senegal']
+
+# %%
+
+# Compute the geomorphon map for each DEM tile.
 
 for country in countries:
-    with rasterio.open(
-        f"./data/pixels/{country}/{country}_rainfedcropland_ls.tif"
-    ) as dataset:
-        pixels_of_interest = dataset.read(1)
-        pixels_of_interest = np.maximum(pixels_of_interest, 0)
+    folder_path = osp.join(__datadir__, 'dem', f'{country}')
+
+    dem_files = [
+        osp.join(folder_path, f) for f in
+        os.listdir(folder_path) if f.endswith('.tif')
+        ]
+
+    for index, dem_file in enumerate(dem_files):
+        print(f"Generating geomorphon map for tile {index:03d} of {country}.")
+
+        dem_filepath = osp.join(folder_path, dem_file)
+
+        geomorphon_folder = osp.join(
+            __datadir__, 'results', 'geomorphons', f'{country}')
+        os.makedirs(geomorphon_folder, exist_ok=True)
+
+        geomorphon_filepath = osp.join(
+            geomorphon_folder, f'{country}_geomorphon_{index:03d}.tif'
+            )
+
+        wbe = wbw.WbEnvironment()
+
+        dem = wbe.read_raster(dem_filepath)
+        dem = wbe.fill_missing_data(
+            dem, filter_size=35, exclude_edge_nodata=True)
+        dem = wbe.gaussian_filter(dem, sigma=2)
+        dem = wbe.fill_missing_data(
+            dem, filter_size=35, exclude_edge_nodata=True)
+
+        wbe.write_raster(
+            wbe.geomorphons(
+                dem,
+                search_distance=100,
+                flatness_threshold=1.0,
+                flatness_distance=0,
+                skip_distance=0,
+                output_forms=True,
+                analyze_residuals=True),
+            geomorphon_filepath,
+            compress=True,
+            )
+
 
     grid = Grid.from_raster(
         f"./data/pixels/{country}/{country}_rainfedcropland_ls.tif", data_name="map"
