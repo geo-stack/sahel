@@ -134,39 +134,54 @@ for country in countries:
             )
 
 
-    grid = Grid.from_raster(
-        f"./data/pixels/{country}/{country}_rainfedcropland_ls.tif", data_name="map"
-    )
+# %%
+
+for country in countries:
+    filepath = osp.join(
+        __datadir__, 'pixels', f"{country}_rainfedcropland_ls.tif"
+        )
+
+    with rasterio.open(filepath) as src:
+        transform = src.transform
+        pixels_of_interest = src.read(1)
+        pixels_of_interest = np.maximum(pixels_of_interest, 0)
 
     rows, cols = np.where(pixels_of_interest == 1)
-    data = convert_indices_to_coords(rows, cols, grid.affine)
-    df = pd.DataFrame(columns=["LON", "LAT"])
-    df["LON"] = data[0]
-    df["LAT"] = data[1]
+    xs, ys = rasterio.transform.xy(transform, rows, cols)
 
-    folder_path = f"./data/dem/{country}/"
+    df = pd.DataFrame({'LON': xs, 'LAT': ys})
 
-    dem_files = os.listdir(folder_path)
-    dem_files = [f for f in dem_files if os.path.isfile(os.path.join(folder_path, f))]
+    folder_path = osp.join(__datadir__, 'dem', f'{country}')
+    dem_files = [
+        f for f in os.listdir(folder_path) if
+        osp.isfile(osp.join(folder_path, f))
+        ]
 
-    for index in range(len(dem_files)):
+    break
+
+    for index, dem_file in enumerate(dem_files):
+        dem_filepath = osp.join(folder_path, dem_file)
+
         if f"map_{country}_{index}.csv" in csv_files:
             continue
-        grid = Grid.from_raster(folder_path + dem_files[index])
+
+        grid = Grid.from_raster(dem_filepath)
+
         part_df = df[
-            (df["LAT"] < grid.bbox[3])
-            & (df["LAT"] > grid.bbox[1])
-            & (df["LON"] < grid.bbox[2])
-            & (df["LON"] > grid.bbox[0])
-        ]
+            (df["LAT"] < grid.bbox[3]) &
+            (df["LAT"] > grid.bbox[1]) &
+            (df["LON"] < grid.bbox[2]) &
+            (df["LON"] > grid.bbox[0])
+            ]
         if len(part_df) == 0:
             continue
-        dem = grid.read_raster(folder_path + dem_files[index])
+
+        dem = grid.read_raster(dem_filepath)
         pit_filled_dem = grid.fill_pits(dem)
         flooded_dem = grid.fill_depressions(pit_filled_dem)
         inflated_dem = grid.resolve_flats(flooded_dem)
-        fdir = grid.flowdir(inflated_dem)
-        acc = grid.accumulation(fdir)
+        flowdir = grid.flowdir(inflated_dem)
+        acc = grid.accumulation(flowdir)
         inflated_dem = cv2.GaussianBlur(inflated_dem, kernel_size, sigma)
 
         res = part_df.copy()
@@ -185,33 +200,12 @@ for country in countries:
         res["altitude"] = np.nan
         res["accumulation"] = np.nan
 
-        wbe = WbEnvironment()
-
-        dem = wbe.read_raster(folder_path + dem_files[index])
-
-        dem = wbe.fill_missing_data(dem, filter_size=35, exclude_edge_nodata=True)
-
-        dem = wbe.gaussian_filter(dem, sigma=2)
-
-        dem = wbe.fill_missing_data(dem, filter_size=35, exclude_edge_nodata=True)
-
-        wbe.write_raster(
-            wbe.geomorphons(
-                dem,
-                search_distance=100,
-                flatness_threshold=1.0,
-                flatness_distance=0,
-                skip_distance=0,
-                output_forms=True,
-                analyze_residuals=True,
-            ),
-            f"./data/results/temp/{country}_map_geomorphons.tif",
-            compress=True,
-        )
-
-        with rasterio.open(
-            f"./data/results/temp/{country}_map_geomorphons.tif"
-        ) as dataset:
+        geomorphon_folder = osp.join(
+            __datadir__, 'results', 'geomorphons', f'{country}')
+        geomorphon_filepath = osp.join(
+            geomorphon_folder, f'{country}_geomorphon_{index:03d}.tif'
+            )
+        with rasterio.open(geomorphon_filepath) as dataset:
             geomorphon = dataset.read(1)
             geomorphon = np.maximum(geomorphon, 0)
 
@@ -228,7 +222,6 @@ for country in countries:
                 filtered_mask[valid_coords[:, 0], valid_coords[:, 1]] = 1
 
         ridges = geomorphon * filtered_mask
-
         ridges = np.minimum(ridges, 1)
 
         streams = np.where(acc > threshold, 1, 0)
