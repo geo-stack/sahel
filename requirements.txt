@@ -13,3 +13,6 @@ requests
 beautifulsoup4
 netCDF4
 rasterio
+opencv-python
+whitebox-workflows
+pysheds
