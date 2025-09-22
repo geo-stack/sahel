@@ -11,7 +11,7 @@
 # For inquiries, contact: info@geostack.ca
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
-
+from __future__ import annotations
 
 # Standard imports
 import os
@@ -31,6 +31,29 @@ import glob
 
 # Local imports
 from sahel import __datadir__
+
+
+def get_dem_filepaths(country: str) -> list:
+    """
+    Return a list of filepaths to all DEM (.tif) files for the
+    specified country.
+
+    Parameters
+    ----------
+    country : str
+        Name of the country for which to retrieve DEM filepaths.
+
+    Returns
+    -------
+    list of str
+        List of filepaths to the country's DEM raster files.
+    """
+    dem_folderpath = osp.join(__datadir__, 'dem', f'{country}')
+    return [
+        osp.join(dem_folderpath, f) for f in
+        os.listdir(dem_folderpath) if
+        f.endswith('.tif')
+        ]
 
 
 def bresenham_line(x0, y0, x1, y1):
@@ -143,12 +166,9 @@ for country in COUNTRIES:
         )
     os.makedirs(geomorphon_folderpath, exist_ok=True)
 
-    dem_filenames = [
-        f for f in os.listdir(dem_folderpath) if f.endswith('.tif')
-        ]
-    for index, dem_filename in enumerate(dem_filenames):
-        dem_filepath = osp.join(dem_folderpath, dem_filename)
+    dem_filepaths = get_dem_filepaths(country)
 
+    for index, dem_filepath in enumerate(dem_filepaths):
         geomorphon_filepath = osp.join(
             geomorphon_folderpath, f'{country}_geomorphon_{index:03d}.tif'
             )
@@ -165,10 +185,12 @@ for country in COUNTRIES:
 # %%
 
 for country in COUNTRIES:
+
+    # Extracts the geographic coordinates (lat/lon) of rainfed cropland pixels
+    # for the specified country (aligned to SRTM, 30 m resolution).
     filepath = osp.join(
         __datadir__, 'pixels', f"{country}_rainfedcropland_ls.tif"
         )
-
     with rasterio.open(filepath) as src:
         transform = src.transform
         pixels_of_interest = src.read(1)
@@ -179,16 +201,8 @@ for country in COUNTRIES:
 
     df = pd.DataFrame({'LON': xs, 'LAT': ys})
 
-    folder_path = osp.join(__datadir__, 'dem', f'{country}')
-    dem_files = [
-        f for f in os.listdir(folder_path) if
-        osp.isfile(osp.join(folder_path, f))
-        ]
-
-    break
-
-    for index, dem_file in enumerate(dem_files):
-        dem_filepath = osp.join(folder_path, dem_file)
+    dem_filepaths = get_dem_filepaths(country)
+    for index, dem_filepath in enumerate(dem_filepaths):
 
         if f"map_{country}_{index}.csv" in csv_files:
             continue
