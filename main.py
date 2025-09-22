@@ -84,59 +84,87 @@ dem_path = osp.join(__datadir__, 'dem')
 # are aligned with the SRTM 30 m. The expected calculation is the groundwater
 # table level at the center of the activated pixels.
 
-countries = ['Burkina', 'Tchad', 'Mali', 'Mauritania', 'Niger', 'Senegal']
+COUNTRIES = ['Burkina', 'Tchad', 'Mali', 'Mauritania', 'Niger', 'Senegal']
+
 
 # %%
 
-# Compute the geomorphon map for each DEM tile.
+# Compute the geomorphon map for each DEM tile of each country and write the
+# resulting map to disk as a GeoTIFF.
 
-for country in countries:
-    folder_path = osp.join(__datadir__, 'dem', f'{country}')
+def create_geomorphon_map(dem_filepath, geomorphon_filepath):
+    """
+    Generate a geomorphon classification map from a DEM and write the
+    resulting map to disk as a GeoTIFF.
 
-    dem_files = [
-        osp.join(folder_path, f) for f in
-        os.listdir(folder_path) if f.endswith('.tif')
+    Parameters
+    ----------
+    dem_filepath : str
+        Path to the input DEM raster file.
+    geomorphon_filepath : str
+        Path to the output geomorphon classification raster file.
+    """
+    wbe = wbw.WbEnvironment()
+
+    dem = wbe.read_raster(dem_filepath)
+    dem = wbe.fill_missing_data(
+        dem, filter_size=35, exclude_edge_nodata=True)
+    dem = wbe.gaussian_filter(dem, sigma=2)
+    dem = wbe.fill_missing_data(
+        dem, filter_size=35, exclude_edge_nodata=True)
+
+    # Note that the double filling is a common pattern in GIS data processing
+    # to ensure a clean, complete raster for subsequent analysis.
+    # The first filling is to fill original gaps and ensure smoothing
+    # operates on valid data. The second filling is to fill any new or
+    # residual gaps created by the smoothing process.
+
+    wbe.write_raster(
+        wbe.geomorphons(
+            dem,
+            search_distance=100,
+            flatness_threshold=1.0,
+            flatness_distance=0,
+            skip_distance=0,
+            output_forms=True,
+            analyze_residuals=True),
+        geomorphon_filepath,
+        compress=True,
+        )
+
+
+for country in COUNTRIES:
+    dem_folderpath = osp.join(
+        __datadir__, 'dem', f'{country}'
+        )
+
+    geomorphon_folderpath = osp.join(
+        __datadir__, 'results', 'geomorphons', f'{country}'
+        )
+    os.makedirs(geomorphon_folderpath, exist_ok=True)
+
+    dem_filenames = [
+        f for f in os.listdir(dem_folderpath) if f.endswith('.tif')
         ]
-
-    for index, dem_file in enumerate(dem_files):
-        print(f"Generating geomorphon map for tile {index:03d} of {country}.")
-
-        dem_filepath = osp.join(folder_path, dem_file)
-
-        geomorphon_folder = osp.join(
-            __datadir__, 'results', 'geomorphons', f'{country}')
-        os.makedirs(geomorphon_folder, exist_ok=True)
+    for index, dem_filename in enumerate(dem_filenames):
+        dem_filepath = osp.join(dem_folderpath, dem_filename)
 
         geomorphon_filepath = osp.join(
-            geomorphon_folder, f'{country}_geomorphon_{index:03d}.tif'
+            geomorphon_folderpath, f'{country}_geomorphon_{index:03d}.tif'
             )
 
-        wbe = wbw.WbEnvironment()
+        if osp.exists(geomorphon_filepath):
+            continue
 
-        dem = wbe.read_raster(dem_filepath)
-        dem = wbe.fill_missing_data(
-            dem, filter_size=35, exclude_edge_nodata=True)
-        dem = wbe.gaussian_filter(dem, sigma=2)
-        dem = wbe.fill_missing_data(
-            dem, filter_size=35, exclude_edge_nodata=True)
+        print(f"Generating geomorphon map for tile {index:03d} of {country}.")
+        create_geomorphon_map(dem_filepath, geomorphon_filepath)
 
-        wbe.write_raster(
-            wbe.geomorphons(
-                dem,
-                search_distance=100,
-                flatness_threshold=1.0,
-                flatness_distance=0,
-                skip_distance=0,
-                output_forms=True,
-                analyze_residuals=True),
-            geomorphon_filepath,
-            compress=True,
-            )
+    break
 
 
 # %%
 
-for country in countries:
+for country in COUNTRIES:
     filepath = osp.join(
         __datadir__, 'pixels', f"{country}_rainfedcropland_ls.tif"
         )
@@ -200,10 +228,9 @@ for country in countries:
         res["altitude"] = np.nan
         res["accumulation"] = np.nan
 
-        geomorphon_folder = osp.join(
-            __datadir__, 'results', 'geomorphons', f'{country}')
         geomorphon_filepath = osp.join(
-            geomorphon_folder, f'{country}_geomorphon_{index:03d}.tif'
+            __datadir__, 'results', 'geomorphons', f'{country}',
+            f'{country}_geomorphon_{index:03d}.tif'
             )
         with rasterio.open(geomorphon_filepath) as dataset:
             geomorphon = dataset.read(1)
