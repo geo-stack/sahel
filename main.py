@@ -16,7 +16,6 @@ from __future__ import annotations
 # Standard imports
 import os
 import os.path as osp
-import pickle
 
 # Third party imports
 import rasterio
@@ -27,7 +26,6 @@ import cv2
 import whitebox_workflows as wbw
 from scipy.ndimage import label
 from skimage.measure import regionprops
-import glob
 
 # Local imports
 from sahel import __datadir__
@@ -275,53 +273,58 @@ for country in COUNTRIES:
                     res.loc[indice, "LON"], res.loc[indice, "LAT"], grid.affine
                 )
 
-                col_min, row_max = max(0, col_point - size), min(n, row_point + size)
-                row_min, col_max = max(0, row_point - size), min(p, col_point + size)
+                col_min = max(0, col_point - size)
+                row_max = min(n, row_point + size)
+                row_min = max(0, row_point - size)
+                col_max = min(p, col_point + size)
                 ones_indices = np.argwhere(
                     ridges[row_min:row_max, col_min:col_max] == 1
                 )
                 distances = np.sqrt(
-                    (ones_indices[:, 0] - row_point + row_min) ** 2
-                    + (ones_indices[:, 1] - col_point + col_min) ** 2
+                    (ones_indices[:, 0] - row_point + row_min) ** 2 +
+                    (ones_indices[:, 1] - col_point + col_min) ** 2
                 )
                 nearest_index = np.argmin(distances)
                 nearest_point = ones_indices[nearest_index]
                 ridge_point_row, ridge_point_col = (
                     nearest_point[0] + row_min,
                     nearest_point[1] + col_min,
-                )
+                    )
 
                 res.at[indice, "ridge_row"] = ridge_point_row
                 res.at[indice, "ridge_col"] = ridge_point_col
 
                 ones_indices = np.argwhere(
                     streams[row_min:row_max, col_min:col_max] == 1
-                )
+                    )
                 distances = np.sqrt(
-                    (ones_indices[:, 0] - row_point + row_min) ** 2
-                    + (ones_indices[:, 1] - col_point + col_min) ** 2
-                )
+                    (ones_indices[:, 0] - row_point + row_min) ** 2 +
+                    (ones_indices[:, 1] - col_point + col_min) ** 2
+                    )
                 nearest_index = np.argmin(distances)
                 nearest_point = ones_indices[nearest_index]
                 stream_point_row, stream_point_col = (
                     nearest_point[0] + row_min,
                     nearest_point[1] + col_min,
-                )
+                    )
 
                 res.at[indice, "stream_row"] = stream_point_row
                 res.at[indice, "stream_col"] = stream_point_col
 
                 stream_points = bresenham_line(
-                    x0=row_point, y0=col_point, x1=ridge_point_row, y1=ridge_point_col
-                )
+                    x0=row_point, y0=col_point,
+                    x1=ridge_point_row, y1=ridge_point_col
+                    )
                 stream_line_points = np.array(
                     [[row, col] for row, col in stream_points]
-                )
-
+                    )
                 top_points = bresenham_line(
-                    x0=row_point, y0=col_point, x1=stream_point_row, y1=stream_point_col
-                )
-                top_line_points = np.array([[row, col] for row, col in top_points])
+                    x0=row_point, y0=col_point,
+                    x1=stream_point_row, y1=stream_point_col
+                    )
+                top_line_points = np.array(
+                    [[row, col] for row, col in top_points]
+                    )
 
                 dem_point = inflated_dem[row_point, col_point]
                 dem_stream = inflated_dem[stream_point_row, stream_point_col]
@@ -332,28 +335,27 @@ for country in COUNTRIES:
 
                 dist_stream = (
                     np.sqrt(
-                        (row_point - stream_point_row) ** 2
-                        + (col_point - stream_point_col) ** 2
-                    )
-                    + 1
+                        (row_point - stream_point_row) ** 2 +
+                        (col_point - stream_point_col) ** 2) + 1
                 )
+
                 dist_ridge = (
                     np.sqrt(
-                        (row_point - ridge_point_row) ** 2
-                        + (col_point - ridge_point_col) ** 2
-                    )
-                    + 1
+                        (row_point - ridge_point_row) ** 2 +
+                        (col_point - ridge_point_col) ** 2) + 1
                 )
 
                 res.at[indice, "dist_stream"] = dist_stream
                 res.at[indice, "dist_top"] = dist_ridge
 
-                res.at[indice, "ratio_alt"] = (dem_point - dem_stream) / (
-                    dem_ridge - dem_point + 0.1
-                )
-                res.at[indice, "ratio_dist"] = dist_stream / dist_ridge
-                res.at[indice, "ratio_stream"] = (dem_point - dem_stream) / dist_stream
-                res.at[indice, "ratio_top"] = (dem_ridge - dem_point) / dist_ridge
+                res.at[indice, "ratio_alt"] = (
+                    (dem_point - dem_stream) / (dem_ridge - dem_point + 0.1))
+                res.at[indice, "ratio_dist"] = (
+                    dist_stream / dist_ridge)
+                res.at[indice, "ratio_stream"] = (
+                    (dem_point - dem_stream) / dist_stream)
+                res.at[indice, "ratio_top"] = (
+                    (dem_ridge - dem_point) / dist_ridge)
 
                 res.at[indice, "altitude"] = inflated_dem[row_point, col_point]
                 res.at[indice, "accumulation"] = acc[row_point, col_point]
