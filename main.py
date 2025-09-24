@@ -86,7 +86,10 @@ def convert_coord_to_indices(lon, lat, grid_affine):
 min_size = 70
 kernel_size = (5, 5)
 sigma = 1.0
+
+# Hyperparameter for acccumlation threshold to extract streams.
 threshold = 1500
+
 size = 200
 
 temp_folder = osp.join(__datadir__, 'results', 'temp')
