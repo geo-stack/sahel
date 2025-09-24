@@ -1,0 +1,10 @@
+conda installspyder-kernels==3.0
+conda install numpy=2.* matplotlib=3.7.* seaborn distinctipy
+conda install numba pandas scipy
+conda install scikit-image opencv-python
+conda install rasterio gdal pysheds
+conda install h5py requests beautifulsoup4 netCDF4 openpyxl
+conda install xgboost scikit-learn
+pip install whitebox-workflows
+
+

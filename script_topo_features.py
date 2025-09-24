@@ -1,5 +1,16 @@
-#!/usr/bin/env python
-# coding: utf-8
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
 
 import rasterio
 from scipy import stats

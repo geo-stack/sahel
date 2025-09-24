@@ -1,22 +1,57 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
+from __future__ import annotations
+
+# Standard imports
 import os
+import os.path as osp
+
+# Third party imports
 import rasterio
 import numpy as np
 from pysheds.grid import Grid
 import pandas as pd
 import cv2
-from whitebox_workflows import WbEnvironment
+import whitebox_workflows as wbw
 from scipy.ndimage import label
 from skimage.measure import regionprops
-import pickle
-import glob
+
+# Local imports
+from sahel import __datadir__
 
 
-def list_folders(directory):
+def get_dem_filepaths(country: str) -> list:
+    """
+    Return a list of filepaths to all DEM (.tif) files for the
+    specified country.
+
+    Parameters
+    ----------
+    country : str
+        Name of the country for which to retrieve DEM filepaths.
+
+    Returns
+    -------
+    list of str
+        List of filepaths to the country's DEM raster files.
+    """
+    dem_folderpath = osp.join(__datadir__, 'dem', f'{country}')
     return [
-        name
-        for name in os.listdir(directory)
-        if os.path.isdir(os.path.join(directory, name))
-    ]
+        osp.join(dem_folderpath, f) for f in
+        os.listdir(dem_folderpath) if
+        f.endswith('.tif')
+        ]
 
 
 def bresenham_line(x0, y0, x1, y1):
@@ -42,12 +77,6 @@ def bresenham_line(x0, y0, x1, y1):
     return points
 
 
-def convert_indices_to_coords(col, row, grid_affine):
-    lon = grid_affine[0] * col + grid.affine[2]
-    lat = grid_affine[4] * row + grid_affine[5]
-    return lon, lat
-
-
 def convert_coord_to_indices(lon, lat, grid_affine):
     col = round((lon - grid_affine[2]) / grid_affine[0])
     row = round((lat - grid_affine[5]) / grid_affine[4])
@@ -57,59 +86,145 @@ def convert_coord_to_indices(lon, lat, grid_affine):
 min_size = 70
 kernel_size = (5, 5)
 sigma = 1.0
+
+# Hyperparameter for acccumlation threshold to extract streams.
 threshold = 1500
+
 size = 200
 
-with open("./models/model.pkl", "rb") as file:
-    model = pickle.load(file)
+temp_folder = osp.join(__datadir__, 'results', 'temp')
+os.makedirs(temp_folder, exist_ok=True)
 
-folder = "./data/results/temp/"
-csv_files = [f for f in os.listdir(folder) if f.endswith('.csv')]
-map_folder = "./data/results/"
-map_csv_files = [f for f in os.listdir(folder) if f.endswith('.csv')]
-directory_path = "./data/dem/"
-countries = list_folders(directory_path)
+csv_files = [f for f in os.listdir(temp_folder) if f.endswith('.csv')]
 
-for country in countries:
-    with rasterio.open(
-        f"./data/pixels/{country}/{country}_rainfedcropland_ls.tif"
-    ) as dataset:
-        pixels_of_interest = dataset.read(1)
+map_folder = osp.join(__datadir__, 'results')
+map_csv_files = [f for f in os.listdir(map_folder) if f.endswith('.csv')]
+
+dem_path = osp.join(__datadir__, 'dem')
+
+# The rainfedcropland rasters (.tif) of the areas where we want to perform
+# groundwater table depth calculations, for the 6 countries of interest:
+# Burkina Faso, Chad, Mali, Mauritania, Niger, and Senegal. These rasters
+# are aligned with the SRTM 30 m. The expected calculation is the groundwater
+# table level at the center of the activated pixels.
+
+COUNTRIES = ['Burkina', 'Tchad', 'Mali', 'Mauritania', 'Niger', 'Senegal']
+
+
+# %%
+
+# Compute the geomorphon map for each DEM tile of each country and write the
+# resulting map to disk as a GeoTIFF.
+
+def create_geomorphon_map(dem_filepath, geomorphon_filepath):
+    """
+    Generate a geomorphon classification map from a DEM and write the
+    resulting map to disk as a GeoTIFF.
+
+    Parameters
+    ----------
+    dem_filepath : str
+        Path to the input DEM raster file.
+    geomorphon_filepath : str
+        Path to the output geomorphon classification raster file.
+    """
+    wbe = wbw.WbEnvironment()
+
+    dem = wbe.read_raster(dem_filepath)
+    dem = wbe.fill_missing_data(
+        dem, filter_size=35, exclude_edge_nodata=True)
+    dem = wbe.gaussian_filter(dem, sigma=2)
+    dem = wbe.fill_missing_data(
+        dem, filter_size=35, exclude_edge_nodata=True)
+
+    # Note that the double filling is a common pattern in GIS data processing
+    # to ensure a clean, complete raster for subsequent analysis.
+    # The first filling is to fill original gaps and ensure smoothing
+    # operates on valid data. The second filling is to fill any new or
+    # residual gaps created by the smoothing process.
+
+    wbe.write_raster(
+        wbe.geomorphons(
+            dem,
+            search_distance=100,
+            flatness_threshold=1.0,
+            flatness_distance=0,
+            skip_distance=0,
+            output_forms=True,
+            analyze_residuals=True),
+        geomorphon_filepath,
+        compress=True,
+        )
+
+
+for country in COUNTRIES:
+    dem_folderpath = osp.join(
+        __datadir__, 'dem', f'{country}'
+        )
+
+    geomorphon_folderpath = osp.join(
+        __datadir__, 'results', 'geomorphons', f'{country}'
+        )
+    os.makedirs(geomorphon_folderpath, exist_ok=True)
+
+    dem_filepaths = get_dem_filepaths(country)
+
+    for index, dem_filepath in enumerate(dem_filepaths):
+        geomorphon_filepath = osp.join(
+            geomorphon_folderpath, f'{country}_geomorphon_{index:03d}.tif'
+            )
+
+        if osp.exists(geomorphon_filepath):
+            continue
+
+        print(f"Generating geomorphon map for tile {index:03d} of {country}.")
+        create_geomorphon_map(dem_filepath, geomorphon_filepath)
+
+    break
+
+
+# %%
+
+for country in COUNTRIES:
+
+    # Extracts the geographic coordinates (lat/lon) of rainfed cropland pixels
+    # for the specified country (aligned to SRTM, 30 m resolution).
+    filepath = osp.join(
+        __datadir__, 'pixels', f"{country}_rainfedcropland_ls.tif"
+        )
+    with rasterio.open(filepath) as src:
+        transform = src.transform
+        pixels_of_interest = src.read(1)
         pixels_of_interest = np.maximum(pixels_of_interest, 0)
 
-    grid = Grid.from_raster(
-        f"./data/pixels/{country}/{country}_rainfedcropland_ls.tif", data_name="map"
-    )
-
     rows, cols = np.where(pixels_of_interest == 1)
-    data = convert_indices_to_coords(rows, cols, grid.affine)
-    df = pd.DataFrame(columns=["LON", "LAT"])
-    df["LON"] = data[0]
-    df["LAT"] = data[1]
+    xs, ys = rasterio.transform.xy(transform, rows, cols)
 
-    folder_path = f"./data/dem/{country}/"
+    df = pd.DataFrame({'LON': xs, 'LAT': ys})
 
-    dem_files = os.listdir(folder_path)
-    dem_files = [f for f in dem_files if os.path.isfile(os.path.join(folder_path, f))]
+    dem_filepaths = get_dem_filepaths(country)
+    for index, dem_filepath in enumerate(dem_filepaths):
 
-    for index in range(len(dem_files)):
         if f"map_{country}_{index}.csv" in csv_files:
             continue
-        grid = Grid.from_raster(folder_path + dem_files[index])
+
+        grid = Grid.from_raster(dem_filepath)
+
         part_df = df[
-            (df["LAT"] < grid.bbox[3])
-            & (df["LAT"] > grid.bbox[1])
-            & (df["LON"] < grid.bbox[2])
-            & (df["LON"] > grid.bbox[0])
-        ]
+            (df["LAT"] < grid.bbox[3]) &
+            (df["LAT"] > grid.bbox[1]) &
+            (df["LON"] < grid.bbox[2]) &
+            (df["LON"] > grid.bbox[0])
+            ]
         if len(part_df) == 0:
             continue
-        dem = grid.read_raster(folder_path + dem_files[index])
+
+        dem = grid.read_raster(dem_filepath)
         pit_filled_dem = grid.fill_pits(dem)
         flooded_dem = grid.fill_depressions(pit_filled_dem)
         inflated_dem = grid.resolve_flats(flooded_dem)
-        fdir = grid.flowdir(inflated_dem)
-        acc = grid.accumulation(fdir)
+        flowdir = grid.flowdir(inflated_dem)
+        acc = grid.accumulation(flowdir)
         inflated_dem = cv2.GaussianBlur(inflated_dem, kernel_size, sigma)
 
         res = part_df.copy()
@@ -128,33 +243,11 @@ for country in countries:
         res["altitude"] = np.nan
         res["accumulation"] = np.nan
 
-        wbe = WbEnvironment()
-
-        dem = wbe.read_raster(folder_path + dem_files[index])
-
-        dem = wbe.fill_missing_data(dem, filter_size=35, exclude_edge_nodata=True)
-
-        dem = wbe.gaussian_filter(dem, sigma=2)
-
-        dem = wbe.fill_missing_data(dem, filter_size=35, exclude_edge_nodata=True)
-
-        wbe.write_raster(
-            wbe.geomorphons(
-                dem,
-                search_distance=100,
-                flatness_threshold=1.0,
-                flatness_distance=0,
-                skip_distance=0,
-                output_forms=True,
-                analyze_residuals=True,
-            ),
-            f"./data/results/temp/{country}_map_geomorphons.tif",
-            compress=True,
-        )
-
-        with rasterio.open(
-            f"./data/results/temp/{country}_map_geomorphons.tif"
-        ) as dataset:
+        geomorphon_filepath = osp.join(
+            __datadir__, 'results', 'geomorphons', f'{country}',
+            f'{country}_geomorphon_{index:03d}.tif'
+            )
+        with rasterio.open(geomorphon_filepath) as dataset:
             geomorphon = dataset.read(1)
             geomorphon = np.maximum(geomorphon, 0)
 
@@ -171,7 +264,6 @@ for country in countries:
                 filtered_mask[valid_coords[:, 0], valid_coords[:, 1]] = 1
 
         ridges = geomorphon * filtered_mask
-
         ridges = np.minimum(ridges, 1)
 
         streams = np.where(acc > threshold, 1, 0)
@@ -184,53 +276,58 @@ for country in countries:
                     res.loc[indice, "LON"], res.loc[indice, "LAT"], grid.affine
                 )
 
-                col_min, row_max = max(0, col_point - size), min(n, row_point + size)
-                row_min, col_max = max(0, row_point - size), min(p, col_point + size)
+                col_min = max(0, col_point - size)
+                row_max = min(n, row_point + size)
+                row_min = max(0, row_point - size)
+                col_max = min(p, col_point + size)
                 ones_indices = np.argwhere(
                     ridges[row_min:row_max, col_min:col_max] == 1
                 )
                 distances = np.sqrt(
-                    (ones_indices[:, 0] - row_point + row_min) ** 2
-                    + (ones_indices[:, 1] - col_point + col_min) ** 2
+                    (ones_indices[:, 0] - row_point + row_min) ** 2 +
+                    (ones_indices[:, 1] - col_point + col_min) ** 2
                 )
                 nearest_index = np.argmin(distances)
                 nearest_point = ones_indices[nearest_index]
                 ridge_point_row, ridge_point_col = (
                     nearest_point[0] + row_min,
                     nearest_point[1] + col_min,
-                )
+                    )
 
                 res.at[indice, "ridge_row"] = ridge_point_row
                 res.at[indice, "ridge_col"] = ridge_point_col
 
                 ones_indices = np.argwhere(
                     streams[row_min:row_max, col_min:col_max] == 1
-                )
+                    )
                 distances = np.sqrt(
-                    (ones_indices[:, 0] - row_point + row_min) ** 2
-                    + (ones_indices[:, 1] - col_point + col_min) ** 2
-                )
+                    (ones_indices[:, 0] - row_point + row_min) ** 2 +
+                    (ones_indices[:, 1] - col_point + col_min) ** 2
+                    )
                 nearest_index = np.argmin(distances)
                 nearest_point = ones_indices[nearest_index]
                 stream_point_row, stream_point_col = (
                     nearest_point[0] + row_min,
                     nearest_point[1] + col_min,
-                )
+                    )
 
                 res.at[indice, "stream_row"] = stream_point_row
                 res.at[indice, "stream_col"] = stream_point_col
 
                 stream_points = bresenham_line(
-                    x0=row_point, y0=col_point, x1=ridge_point_row, y1=ridge_point_col
-                )
+                    x0=row_point, y0=col_point,
+                    x1=ridge_point_row, y1=ridge_point_col
+                    )
                 stream_line_points = np.array(
                     [[row, col] for row, col in stream_points]
-                )
-
+                    )
                 top_points = bresenham_line(
-                    x0=row_point, y0=col_point, x1=stream_point_row, y1=stream_point_col
-                )
-                top_line_points = np.array([[row, col] for row, col in top_points])
+                    x0=row_point, y0=col_point,
+                    x1=stream_point_row, y1=stream_point_col
+                    )
+                top_line_points = np.array(
+                    [[row, col] for row, col in top_points]
+                    )
 
                 dem_point = inflated_dem[row_point, col_point]
                 dem_stream = inflated_dem[stream_point_row, stream_point_col]
@@ -241,65 +338,30 @@ for country in countries:
 
                 dist_stream = (
                     np.sqrt(
-                        (row_point - stream_point_row) ** 2
-                        + (col_point - stream_point_col) ** 2
-                    )
-                    + 1
+                        (row_point - stream_point_row) ** 2 +
+                        (col_point - stream_point_col) ** 2) + 1
                 )
+
                 dist_ridge = (
                     np.sqrt(
-                        (row_point - ridge_point_row) ** 2
-                        + (col_point - ridge_point_col) ** 2
-                    )
-                    + 1
+                        (row_point - ridge_point_row) ** 2 +
+                        (col_point - ridge_point_col) ** 2) + 1
                 )
 
                 res.at[indice, "dist_stream"] = dist_stream
                 res.at[indice, "dist_top"] = dist_ridge
 
-                res.at[indice, "ratio_alt"] = (dem_point - dem_stream) / (
-                    dem_ridge - dem_point + 0.1
-                )
-                res.at[indice, "ratio_dist"] = dist_stream / dist_ridge
-                res.at[indice, "ratio_stream"] = (dem_point - dem_stream) / dist_stream
-                res.at[indice, "ratio_top"] = (dem_ridge - dem_point) / dist_ridge
+                res.at[indice, "ratio_alt"] = (
+                    (dem_point - dem_stream) / (dem_ridge - dem_point + 0.1))
+                res.at[indice, "ratio_dist"] = (
+                    dist_stream / dist_ridge)
+                res.at[indice, "ratio_stream"] = (
+                    (dem_point - dem_stream) / dist_stream)
+                res.at[indice, "ratio_top"] = (
+                    (dem_ridge - dem_point) / dist_ridge)
 
                 res.at[indice, "altitude"] = inflated_dem[row_point, col_point]
                 res.at[indice, "accumulation"] = acc[row_point, col_point]
             except Exception as e:
                 print(e)
                 continue
-
-        new_res = res.dropna()
-        X = new_res[
-            [
-                "alt_stream",
-                "dist_stream",
-                "alt_top",
-                "dist_top",
-                "ratio_alt",
-                "ratio_dist",
-                "ratio_stream",
-                "ratio_top",
-                "altitude",
-                "accumulation",
-            ]
-        ].astype("float")
-        X["dist_stream_inverse"] = 1 / (X["dist_stream"] + 1)
-        X = X.drop(columns=["dist_stream"])
-
-        Y = model.predict(X)
-
-        new_res["Predicted_NS"] = Y
-
-        new_res.to_csv("./data/results/temp/" + f"map_{country}_{index}.csv")
-
-    if f"map_{country}.csv" in map_csv_files:
-        continue
-    fichiers_csv = glob.glob(f"{folder}/*{country}*.csv")
-
-    dfs = [pd.read_csv(fichier, index_col=0) for fichier in fichiers_csv]
-    merged_df = pd.concat(dfs, ignore_index=True)
-    merged_df = merged_df[["LON", "LAT", "Predicted_NS"]]
-
-    merged_df.to_csv("./data/results/" + f"map_{country}.csv")
