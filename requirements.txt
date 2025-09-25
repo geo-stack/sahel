@@ -5,6 +5,4 @@ conda install scikit-image opencv
 conda install rasterio gdal pysheds
 conda install h5py requests beautifulsoup4 netCDF4 openpyxl
 conda install xgboost scikit-learn
-pip install whitebox-workflows
-
-
+pip install whitebox-workflows whitebox
