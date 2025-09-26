@@ -148,4 +148,12 @@ for i, zip_name in enumerate(zip_names):
         convert_hgt_to_geotiff(zip_filepath, osp.dirname(dest_dir))
 
 
-    break
+# %%
+
+dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
+
+ds = gdal.BuildVRT(
+    osp.join(__datadir__, 'dem', "Global.vrt"),
+    dem_filepaths)
+ds.FlushCache()
+del ds
