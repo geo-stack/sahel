@@ -124,6 +124,8 @@ print('Authentication with NASA Earthdata was successful.')
 
 # %%
 
+# Download NASADEM .hgt files.
+
 missing_tiles = []
 
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
@@ -144,16 +146,33 @@ for i, zip_name in enumerate(zip_names):
     except Exception:
         print(f'Failed to download DEM data for tile {i + 1} ({zip_name}).')
         missing_tiles.append(zip_name)
-    else:
-        convert_hgt_to_geotiff(zip_filepath, osp.dirname(dest_dir))
 
 
 # %%
 
+# Convert hgt files to GeoTiff.
+
+for zip_name in zip_names:
+    zip_filepath = osp.join(dest_dir, zip_name)
+    if not osp.exists(zip_filepath):
+        continue
+
+    root, _ = osp.splitext(zip_filepath)
+    tif_path = osp.join(osp.dirname(dest_dir), osp.basename(root) + '.tif')
+
+    if not osp.exists(tif_path):
+        convert_hgt_to_geotiff(zip_filepath, tif_path)
+
+
+# %%
+
+# Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
+
 dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
 
-ds = gdal.BuildVRT(
-    osp.join(__datadir__, 'dem', "Global.vrt"),
-    dem_filepaths)
+vrt_filename = osp.join(__datadir__, 'dem', "Global.vrt")
+ds = gdal.BuildVRT(vrt_filename, dem_filepaths)
 ds.FlushCache()
 del ds
+
+print(f'Virtual dataset generated at {vrt_filename}.')
