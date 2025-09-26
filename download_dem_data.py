@@ -40,6 +40,7 @@ References
 - NASADEM project: https://www.earthdata.nasa.gov/about/competitive-programs/
   measures/new-nasa-digital-elevation-model
 - USGS Earthdata: https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/
+- https://www.earthdata.nasa.gov/data/catalog/lpcloud-nasadem-hgt-001
 """
 
 # ---- Standard imports.
@@ -51,10 +52,11 @@ import earthaccess
 from earthaccess.exceptions import LoginAttemptFailure
 import numpy as np
 import keyring
+from osgeo import gdal
 
 # ---- Local imports.
 from sahel import __datadir__, CONF
-from sahel.gishelpers import convert_hgt_to_geotiff
+from sahel.gishelpers import convert_hgt_to_geotiff, get_dem_filepaths
 
 # Define longitude and latitude ranges (covering West Africa)
 LON_MIN = -19
@@ -122,6 +124,8 @@ print('Authentication with NASA Earthdata was successful.')
 
 # %%
 
+missing_tiles = []
+
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
 for i, zip_name in enumerate(zip_names):
     print(f'Processing tile {i + 1} of {len(zip_names)}...')
@@ -134,7 +138,14 @@ for i, zip_name in enumerate(zip_names):
         continue
 
     # Download the ZIP file and convert to GeoTIFF.
-    earthaccess.download(url, osp.dirname(zip_filepath), show_progress=False)
-    convert_hgt_to_geotiff(zip_filepath, osp.dirname(dest_dir))
+    try:
+        earthaccess.download(
+            url, osp.dirname(zip_filepath), show_progress=False)
+    except Exception:
+        print(f'Failed to download DEM data for tile {i + 1} ({zip_name}).')
+        missing_tiles.append(zip_name)
+    else:
+        convert_hgt_to_geotiff(zip_filepath, osp.dirname(dest_dir))
+
 
     break
