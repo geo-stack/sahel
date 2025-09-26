@@ -3,6 +3,7 @@ data/dem/*
 data/results/*
 data/pixels/*
 data/noaa_ndvi/*
+data/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
