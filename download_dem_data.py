@@ -34,6 +34,7 @@ Main Features
   using rasterio, for ease of use in GIS and scientific workflows.
 - Stores the resulting GeoTIFFs in the 'data/dem/Global/hgt' directory within
   your local Sahel project.
+- Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
 
 References
 ----------
