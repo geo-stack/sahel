@@ -46,7 +46,7 @@ def get_dem_filepaths(dirname: str) -> list:
 
 
 def convert_hgt_to_geotiff(
-        zip_path: str, dest_dir: str = None, compress: str = 'zstd'):
+        zip_path: str, tif_path: str, compress: str = 'zstd'):
     """
     Extracts the .hgt file from a zip archive and converts it to a GeoTIFF.
 
@@ -55,16 +55,12 @@ def convert_hgt_to_geotiff(
     zip_path : str
         Path to the input ZIP archive containing the .hgt DEM tile.
     dest_dir : str, optional
-        Directory to save the resulting GeoTIFF file. If None (default),
-        saves to the same directory as the input zip file.
+        Path where to save the GeoTiff file.
     compress : str or None, optional
         Compression method to use for the output GeoTIFF (e.g., 'zstd',
         'DEFLATE', 'LZW'). If None, no compression is applied.
         Default is 'zstd'.
     """
-    if dest_dir is None:
-        dest_dir = osp.dirname(zip_path)
-
     # Find the .hgt file name inside the zip archive.
     with zipfile.ZipFile(zip_path, 'r') as zf:
         for fname in zf.namelist():
@@ -80,10 +76,6 @@ def convert_hgt_to_geotiff(
         profile = src.profile
         data = src.read(1)
         profile.update(driver='GTiff')
-
-    # Set the output GeoTIFF path.
-    root, _ = osp.splitext(zip_path)
-    tif_path = osp.join(dest_dir, osp.basename(root) + '.tif')
 
     # Write to GeoTIFF.
     if compress is not None:
