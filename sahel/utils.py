@@ -8,10 +8,19 @@
 # For inquiries, contact: info@geostack.ca
 # Repository: https://github.com/geo-stack/sahel_water_table_ml
 # =============================================================================
-import pandas as pd
+
+# ---- Standard imports
+import os
+import os.path as osp
 import re
-import matplotlib.pyplot as plt
 from datetime import datetime
+
+# ---- Third party imports
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ---- Local imports
+from sahel import __datadir__
 
 
 def read_obs_wl(filename) -> pd.DataFrame:

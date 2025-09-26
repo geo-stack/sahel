@@ -31,29 +31,6 @@ from skimage.measure import regionprops
 from sahel import __datadir__
 
 
-def get_dem_filepaths(country: str) -> list:
-    """
-    Return a list of filepaths to all DEM (.tif) files for the
-    specified country.
-
-    Parameters
-    ----------
-    country : str
-        Name of the country for which to retrieve DEM filepaths.
-
-    Returns
-    -------
-    list of str
-        List of filepaths to the country's DEM raster files.
-    """
-    dem_folderpath = osp.join(__datadir__, 'dem', f'{country}')
-    return [
-        osp.join(dem_folderpath, f) for f in
-        os.listdir(dem_folderpath) if
-        f.endswith('.tif')
-        ]
-
-
 def bresenham_line(x0, y0, x1, y1):
     points = []
     dx = abs(x1 - x0)

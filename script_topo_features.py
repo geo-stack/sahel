@@ -25,22 +25,6 @@ import os
 import pandas as pd
 
 
-def array_to_cord(transform, row, col):
-    """
-    Convert array indices to geographic coordinates.
-
-    Parameters:
-    transform (Affine): The affine transformation object.
-    row (int): The row index in the array.
-    col (int): The column index in the array.
-
-    Returns:
-    tuple: The longitude and latitude coordinates.
-    """
-    lon, lat = transform * (col, row)
-    return lon, lat
-
-
 def coord_to_array(transform, lon, lat):
     """
     Convert geographic coordinates to array indices.
