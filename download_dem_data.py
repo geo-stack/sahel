@@ -74,15 +74,15 @@ if earthdata_username is None or earthdata_password is None:
     earthdata_username = input("Earthdata username: ")
     if not earthdata_username:
         raise ValueError(
-            'Please run this cell again and provide valid '
-            'Earthdata credentials.'
+            "No Earthdata username provided. Please rerun and enter "
+            "your credentials."
             )
 
     earthdata_password = input("Earthdata password: ")
     if not earthdata_password:
         raise ValueError(
-            'Please run this cell again and provide valid '
-            'Earthdata credentials.'
+            "No Earthdata password provided. Please rerun and "
+            "enter your credentials."
             )
 
 
@@ -93,9 +93,8 @@ os.environ["EARTHDATA_PASSWORD"] = earthdata_password
 try:
     earthaccess.login()
 except LoginAttemptFailure:
-    raise ValueError(
-        'Please run this cell again and provide valid '
-        'Earthdata credentials.'
+    raise LoginAttemptFailure(
+        "Earthdata login failed. Please check your credentials and try again."
         )
 else:
     CONF.set('main', 'earthdata_username', earthdata_username)
