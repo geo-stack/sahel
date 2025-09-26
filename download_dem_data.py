@@ -101,7 +101,7 @@ else:
     CONF.set('main', 'earthdata_username', earthdata_username)
     keyring.set_password("earthdata", earthdata_username, earthdata_password)
 
-print('Login to EARTHDATA')
+print('Authentication with NASA Earthdata was successful.')
 
 
 # %%
