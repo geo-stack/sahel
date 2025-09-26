@@ -77,7 +77,7 @@ for lon in np.arange(LON_MIN, LON_MAX + 1):
         zip_names.append(
             f"NASADEM_HGT_"
             f"{'n' if lat >= 0 else 's'}{abs(lat):02d}"
-            f"{'w' if lon <= 0 else 'e'}{abs(lon):03d}"
+            f"{'w' if lon < 0 else 'e'}{abs(lon):03d}"
             ".zip")
 
 
