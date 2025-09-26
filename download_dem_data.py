@@ -10,19 +10,36 @@
 # =============================================================================
 
 """
-Download and convert NASADEM DEM .hgt tiles to GeoTIFF format.
+Module for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
+format for the Sahel region.
 
-This script:
-- Generates a list of NASADEM SRTM tile filenames covering a specified
-  lat/lon bounding box.
-- Downloads each tile (as a ZIP) from the NASA Earthdata/USGS MEASURES archive,
-  using earthaccess authentication.
-- Extracts the .hgt file from the ZIP (using GDAL VFS for direct access).
-- Converts the .hgt file to a compressed (ZSTD) GeoTIFF using rasterio.
+This script automates the process of acquiring, extracting, and converting
+high-resolution Digital Elevation Model (DEM) data from NASA's NASADEM
+dataset
 
-See:
-    https://www.earthdata.nasa.gov/about/competitive-programs/measures/
-    new-nasa-digital-elevation-model
+see https://github.com/geo-stack/sahel/pull/5
+
+
+Main Features
+-------------
+- Defines a latitude/longitude bounding box covering all countries of the
+  Sahel region of interest.
+- Generates the list of NASADEM tile filenames needed to cover this region.
+- Downloads each DEM tile as a ZIP archive directly from the NASA Earthdata/
+  USGS MEASURES service, using secure authentication via the `earthaccess`
+  library.
+- Extracts the .hgt DEM file directly from the ZIP using GDAL's virtual file
+  system (no need for manual unzipping).
+- Converts each .hgt file to a compressed GeoTIFF (default: ZSTD compression)
+  using rasterio, for ease of use in GIS and scientific workflows.
+- Stores the resulting GeoTIFFs in the 'data/dem/Global/hgt' directory within
+  your local Sahel project.
+
+References
+----------
+- NASADEM project: https://www.earthdata.nasa.gov/about/competitive-programs/
+  measures/new-nasa-digital-elevation-model
+- USGS Earthdata: https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/
 """
 
 # ---- Standard imports.
@@ -39,21 +56,21 @@ import keyring
 from sahel import __datadir__, CONF
 from sahel.gishelpers import convert_hgt_to_geotiff
 
+# Define longitude and latitude ranges (covering West Africa)
+LON_MIN = -19
+LON_MAX = 25
+LAT_MIN = 5
+LAT_MAX = 29
+
 
 # Prepare output directory.
 dest_dir = osp.join(__datadir__, 'dem', 'Global', 'hgt')
 os.makedirs(dest_dir, exist_ok=True)
 
-# Define longitude and latitude ranges (covering West Africa)
-lon_min = -19
-lon_max = 25
-lat_min = 5
-lat_max = 29
-
 # Generate NASADEM zip filenames for the specified tiling grid.
 zip_names = []
-for lon in np.arange(lon_min, lon_max + 1):
-    for lat in np.arange(lat_min, lat_max + 1):
+for lon in np.arange(LON_MIN, LON_MAX + 1):
+    for lat in np.arange(LAT_MIN, LAT_MAX + 1):
         zip_names.append(
             f"NASADEM_HGT_"
             f"{'n' if lat >= 0 else 's'}{abs(lat):02d}"
