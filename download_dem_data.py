@@ -125,12 +125,29 @@ print('Authentication with NASA Earthdata was successful.')
 
 # %%
 
-# Download NASADEM .hgt files.
+# Get the list of available tile names from the NASADEM dataset.
+
+granules = earthaccess.search_data(
+    short_name="NASADEM_HGT",
+    version="001",
+    temporal="2000-02-11",
+    cloud_hosted=False
+)
+avail_zip_names = [
+    granule['meta']['native-id'] + '.zip' for granule in granules
+    ]
+
+
+# Download the NASADEM tiles.
 
 missing_tiles = []
-
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
 for i, zip_name in enumerate(zip_names):
+    if zip_name not in avail_zip_names:
+        print(f'Skipping tile {i + 1} of {len(zip_names)} '
+              f'because it does not exist...')
+        continue
+
     print(f'Processing tile {i + 1} of {len(zip_names)}...')
 
     url = base_url + zip_name
