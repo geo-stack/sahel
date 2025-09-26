@@ -23,32 +23,6 @@ import matplotlib.pyplot as plt
 from sahel import __datadir__
 
 
-def get_dem_filepaths(country: str) -> list:
-    """
-    Return a list of filepaths to all DEM (.tif) files for the
-    specified country.
-
-    Parameters
-    ----------
-    country : str
-        Name of the country for which to retrieve DEM filepaths.
-
-    Returns
-    -------
-    list of str
-        List of filepaths to the country's DEM raster files.
-    """
-    dem_folderpath = osp.join(__datadir__, 'dem', f'{country}')
-    if not osp.exists(dem_folderpath):
-        return []
-    else:
-        return [
-            osp.join(dem_folderpath, f) for f in
-            os.listdir(dem_folderpath) if
-            f.endswith('.tif')
-            ]
-
-
 def read_obs_wl(filename) -> pd.DataFrame:
     """
     Read water level observations from an Excel file and preprocess

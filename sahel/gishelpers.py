@@ -20,6 +20,31 @@ import zipfile
 import rasterio
 
 
+def get_dem_filepaths(dirname: str) -> list:
+    """
+    Return a list of filepaths to all DEM (.tif) files for the
+    specified directory.
+
+    Parameters
+    ----------
+    directory : str
+        The directory where to retrieve DEM filepaths.
+
+    Returns
+    -------
+    list of str
+        List of filepaths to the DEM raster files contained in the provided
+        directory.
+    """
+    if not osp.exists(dirname):
+        return []
+    else:
+        return [
+            osp.join(dirname, f) for f in
+            os.listdir(dirname) if f.endswith('.tif')
+            ]
+
+
 def convert_hgt_to_geotiff(
         zip_path: str, dest_dir: str = None, compress: str = 'zstd'):
     """
