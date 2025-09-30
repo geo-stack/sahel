@@ -12,6 +12,11 @@
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
+# ---- Standard imports
+import os
+import os.path as osp
+
+# ---- Third party imports
 import rasterio
 from scipy import stats
 import numpy as np
@@ -21,8 +26,11 @@ from whitebox import WhiteboxTools
 from skimage.morphology import skeletonize, remove_small_objects
 from scipy.ndimage import label
 from skimage.measure import regionprops
-import os
 import pandas as pd
+
+# ---- Local imports
+from sahel import __datadir__
+from sahel.utils import read_obs_wl, get_dem_filepaths
 
 
 def coord_to_array(transform, lon, lat):
@@ -125,48 +133,28 @@ def new_bresenham_line(row0, col0, row1, col1, thickness=1):
     return list(set(points))
 
 
-# List of countries and corresponding date methods.
-dem_countries = ["Benin", "Burkina", "Guinee"]
-
-# Indicates the type of the column "DATE" in the csv.
-date_methods = ["datetime", "str", "datetime"]
-
 # Mapping of countries to inference names i.e. "Benin.tif" for DEM
 # and "BF.csv" for data points.
-dem_to_inference = {
-    "Benin": "Benin",
-    "Burkina": "BF",
-    "Guinee": "gui",
-    "Mali": "Mali",
-    "Niger": "Niger",
-    "Togo": "Togo",
-}
+COUNTRIES = ['Burkina', 'Benin', 'Guinee', 'Mali', 'Niger', 'Togo']
 
 # Main processing loop for each country.
-for training_num in range(len(dem_countries)):
-    dem_country = dem_countries[training_num]
-    inference_country = dem_to_inference[dem_country]
+for country in COUNTRIES:
 
     # Load training data.
-    training_df = pd.read_excel(f"Training_data/{inference_country}.xlsx")
+    training_df = read_obs_wl(
+        osp.join(__datadir__, 'data', f'{country}.xlsx')
+        )
+
+    continue
 
     # Filter data based on date method (Meteorological data
     # are available from 2002).
-    if date_methods[training_num] == "datetime":
-        training_df["DATE"] = pd.to_datetime(
-            training_df["DATE"], errors="coerce")
-        training_df = training_df[
-            (training_df["DATE"].dt.year > 2002) &
-            (training_df["DATE"].dt.year < 2025)
+    training_df = training_df[
+        (training_df["DATE"].dt.year > 2002) &
+        (training_df["DATE"].dt.year < 2025)
         ]
-    elif date_methods[training_num] == "str":
-        training_df = training_df[
-            training_df["DATE"].apply(lambda row: int(row.split("/")[2])) > 2002
-        ]
-    else:
-        training_df = training_df[training_df["DATE"] > 2002]
 
-    # Load DEM data
+    # Load DEM data.
     with rasterio.open(f"DEM/{dem_country}/{dem_country}.tif") as src:
         transform = src.transform
         area = src.read(1)
