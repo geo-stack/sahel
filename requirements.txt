@@ -1,15 +1,9 @@
-numpy
-pandas
-openpyxl
-scipy
-scikit-image
-scikit-learn
-xgboost
-matplotlib
-seaborn
-distinctipy
-h5py>=3
-requests
-beautifulsoup4
-netCDF4
-rasterio
+conda installspyder-kernels==3.0
+conda install keyring earthaccess
+conda install numpy=2.* matplotlib=3.7.* seaborn distinctipy
+conda install numba pandas scipy
+conda install scikit-image opencv
+conda install rasterio gdal pysheds
+conda install h5py requests beautifulsoup4 netCDF4 openpyxl
+conda install xgboost scikit-learn
+pip install whitebox-workflows whitebox

@@ -1,5 +1,16 @@
-#!/usr/bin/env python
-# coding: utf-8
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright 2024 (C) Aziz Agrebi
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# Originally developed by Aziz Agrebi as part of his master's project.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel
+# =============================================================================
 
 import rasterio
 from scipy import stats
@@ -12,22 +23,6 @@ from scipy.ndimage import label
 from skimage.measure import regionprops
 import os
 import pandas as pd
-
-
-def array_to_cord(transform, row, col):
-    """
-    Convert array indices to geographic coordinates.
-
-    Parameters:
-    transform (Affine): The affine transformation object.
-    row (int): The row index in the array.
-    col (int): The column index in the array.
-
-    Returns:
-    tuple: The longitude and latitude coordinates.
-    """
-    lon, lat = transform * (col, row)
-    return lon, lat
 
 
 def coord_to_array(transform, lon, lat):
