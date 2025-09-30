@@ -13,6 +13,10 @@
 Module for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
 format for the Sahel region.
 
+To use this script, you must have a valid NASA Earthdata account. You will be
+prompted to provide your Earthdata username and password for authentication.
+You can create an account for free at: https://urs.earthdata.nasa.gov/
+
 This script automates the process of acquiring, extracting, and converting
 high-resolution Digital Elevation Model (DEM) data from NASA's NASADEM
 dataset
