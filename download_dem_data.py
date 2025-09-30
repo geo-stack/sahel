@@ -70,14 +70,30 @@ LAT_MIN = 5
 LAT_MAX = 29
 
 
+blocklisted_tiles = [
+    'NASADEM_HGT_n27w015.zip',
+    'NASADEM_HGT_n27w016.zip',
+    'NASADEM_HGT_n27w017.zip',
+    'NASADEM_HGT_n27w018.zip',
+    'NASADEM_HGT_n27w019.zip',
+    'NASADEM_HGT_n28w014.zip',
+    'NASADEM_HGT_n28w015.zip',
+    'NASADEM_HGT_n28w016.zip',
+    'NASADEM_HGT_n28w017.zip',
+    'NASADEM_HGT_n28w018.zip',
+    'NASADEM_HGT_n28w019.zip',
+    'NASADEM_HGT_n29w014.zip',
+    ]
+
+
 # Prepare output directory.
 dest_dir = osp.join(__datadir__, 'dem', 'Global', 'hgt')
 os.makedirs(dest_dir, exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
 zip_names = []
-for lon in np.arange(LON_MIN, LON_MAX + 1):
-    for lat in np.arange(LAT_MIN, LAT_MAX + 1):
+for lat in np.arange(LAT_MIN, LAT_MAX + 1):
+    for lon in np.arange(LON_MIN, LON_MAX + 1):
         zip_names.append(
             f"NASADEM_HGT_"
             f"{'n' if lat >= 0 else 's'}{abs(lat):02d}"
@@ -147,6 +163,10 @@ avail_zip_names = [
 missing_tiles = []
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
 for i, zip_name in enumerate(zip_names):
+    if zip_name in blocklisted_tiles:
+        print(f'Skipping tile {i + 1} of {len(zip_names)} '
+              f'because it is blocklisted...')
+        continue
     if zip_name not in avail_zip_names:
         print(f'Skipping tile {i + 1} of {len(zip_names)} '
               f'because it does not exist...')
