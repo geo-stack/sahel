@@ -140,3 +140,62 @@ def tile_in_boundary(
             )
 
 
+def extract_tile_with_overlap(
+        tile_fpath, vrt_fpath, out_fpath, overlap_pixels=250
+        ):
+    """
+    Extracts a DEM chunk from a global VRT corresponding to a given tile,
+    with optional padding (overlap), and saves it as a GeoTIFF.
+
+    Parameters
+    ----------
+    tile_fpath : str
+        Path to the input DEM tile GeoTIFF.
+    vrt_fpath : str
+        Path to the global VRT mosaic file.
+    out_fpath : str
+        Path where the extracted chunk will be saved as a GeoTIFF.
+    overlap_pixels : int, optional
+        Number of pixels to pad around the tile in all directions.
+        Default is 250.
+    """
+
+    # Get tile bounds and shape
+    with rasterio.open(tile_fpath) as tile_src:
+        tile_bounds = tile_src.bounds
+        tile_crs = tile_src.crs
+
+    # Open VRT and extract DEM chunk with overlap.
+    with rasterio.open(vrt_fpath) as vrt_src:
+        assert vrt_src.crs == tile_crs, "CRS mismatch between VRT and tile!"
+
+        # Map tile upper-left and lower-right to VRT indices.
+        ul_row, ul_col = vrt_src.index(tile_bounds.left, tile_bounds.top)
+        lr_row, lr_col = vrt_src.index(tile_bounds.right, tile_bounds.bottom)
+
+        # Add overlap, ensuring bounds.
+        col_off = max(ul_col - overlap_pixels, 0)
+        row_off = max(ul_row - overlap_pixels, 0)
+        col_end = min(lr_col + overlap_pixels, vrt_src.width)
+        row_end = min(lr_row + overlap_pixels, vrt_src.height)
+
+        win_width = col_end - col_off
+        win_height = row_end - row_off
+
+        window = Window(col_off, row_off, win_width, win_height)
+        dem_chunk = vrt_src.read(1, window=window)
+        chunk_transform = window_transform(window, vrt_src.transform)
+
+        # Save extracted chunk to output GeoTIFF.
+        profile = vrt_src.profile.copy()
+        profile.update({
+            "driver": "GTiff",
+            "height": dem_chunk.shape[0],
+            "width": dem_chunk.shape[1],
+            "transform": chunk_transform,
+            "count": 1,
+            "dtype": dem_chunk.dtype,
+        })
+
+        with rasterio.open(out_fpath, "w", **profile) as dst:
+            dst.write(dem_chunk, 1)
