@@ -17,7 +17,12 @@ import os.path as osp
 import zipfile
 
 # ---- Third party imports
+import geopandas as gpd
+import pyproj
 import rasterio
+from shapely.geometry import box
+from shapely.ops import transform
+from rasterio.windows import Window, transform as window_transform
 
 
 def get_dem_filepaths(dirname: str) -> list:
@@ -83,3 +88,55 @@ def convert_hgt_to_geotiff(
 
     with rasterio.open(tif_path, 'w', **profile) as dst:
         dst.write(data, 1)
+
+
+def tile_in_boundary(
+        tile_fpath: str, boundary_fpath: str, mode="intersects"
+        ) -> bool:
+    """
+    Check if a GeoTIFF tile is within or intersects a boundary from
+    a GeoJSON file.
+
+    Parameters
+    ----------
+    tile_path : str
+        Path to the GeoTIFF tile.
+    boundary_geojson_path : str
+        Path to the GeoJSON file with the boundary.
+    mode : str, optional
+        "intersects" (default): returns True if tile crosses or is
+            within boundary.
+        "within": returns True only if tile is fully within the boundary.
+
+    Returns
+    -------
+    result : bool
+        True if the tile matches the test, False otherwise.
+    """
+    # Load boundary.
+    boundary_gdf = gpd.read_file(boundary_fpath)
+    boundary_geom = boundary_gdf.union_all()
+    boundary_crs = boundary_gdf.crs
+
+    # Load tile bounds and CRS.
+    with rasterio.open(tile_fpath) as src:
+        bounds = src.bounds
+        tile_crs = src.crs
+        tile_box = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+
+    # Reproject tile_box if CRS doesn't match.
+    if boundary_crs != tile_crs:
+        project = pyproj.Transformer.from_crs(
+            tile_crs, boundary_crs, always_xy=True).transform
+        tile_box = transform(project, tile_box)
+
+    if mode == "intersects":
+        return tile_box.intersects(boundary_geom)
+    elif mode == "within":
+        return tile_box.within(boundary_geom)
+    else:
+        raise ValueError(
+            f"'mode' must be 'intersects' or 'within', but got {mode}."
+            )
+
+
