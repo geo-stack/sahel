@@ -19,7 +19,7 @@ import geopandas as gpd
 
 
 # ---- Local imports.
-from sahel import __datadir__, CONF
+from sahel import __datadir__
 
 gadm_dirpath = osp.join(__datadir__, 'gadm')
 
@@ -48,22 +48,11 @@ proj_crs = gdf_all.crs
 # Dissolve into a single geometry (union of all shapes).
 unified_boundary = gdf_all.union_all()
 
-# Add buffer around geometry.
-padding_meters = 10000  # 10km buffer
-padded_boundary = unified_boundary.buffer(padding_meters)
-
 # Reproject back to EPSG:4326.
 gdf_unified_boundary = gpd.GeoSeries(
     unified_boundary, crs=proj_crs).to_crs(orig_crs)
 
-gdf_padded_boundary = gpd.GeoSeries(
-    padded_boundary, crs=proj_crs).to_crs(orig_crs)
-
 # Save boundary to geojson file.
 gdf_unified_boundary.to_file(
     osp.join(gadm_dirpath, "unified_boundary.json"),
-    driver="GeoJSON")
-
-gdf_padded_boundary.to_file(
-    osp.join(gadm_dirpath, "unified_padded_boundary.json"),
     driver="GeoJSON")
