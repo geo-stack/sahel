@@ -37,22 +37,16 @@ geojson_files = [
 
 # Concatenate into a single GeoDataFrame.
 gdfs = [gpd.read_file(osp.join(gadm_dirpath, f)) for f in geojson_files]
-orig_crs = gdfs[0].crs
+crs = gdfs[0].crs
 
-gdf_all = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=orig_crs)
-
-# Reproject to World Mercator (EPSG:3395).
-gdf_all = gdf_all.to_crs(epsg=3395)
-proj_crs = gdf_all.crs
+gdf_all = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=crs)
 
 # Dissolve into a single geometry (union of all shapes).
 unified_boundary = gdf_all.union_all()
 
-# Reproject back to EPSG:4326.
-gdf_unified_boundary = gpd.GeoSeries(
-    unified_boundary, crs=proj_crs).to_crs(orig_crs)
-
 # Save boundary to geojson file.
+gdf_unified_boundary = gpd.GeoSeries(unified_boundary, crs=crs)
+
 gdf_unified_boundary.to_file(
     osp.join(gadm_dirpath, "unified_boundary.json"),
     driver="GeoJSON")
