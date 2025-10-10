@@ -87,7 +87,7 @@ blocklisted_tiles = [
 
 
 # Prepare output directory.
-dest_dir = osp.join(__datadir__, 'dem', 'Global', 'hgt')
+dest_dir = osp.join(__datadir__, 'dem', 'raw', 'hgt')
 os.makedirs(dest_dir, exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
@@ -194,16 +194,23 @@ for i, zip_name in enumerate(zip_names):
 
 # Convert hgt files to GeoTiff.
 
-for zip_name in zip_names:
-    zip_filepath = osp.join(dest_dir, zip_name)
-    if not osp.exists(zip_filepath):
-        continue
+from sahel.gishelpers import multi_convert_hgt_to_geotiff
+import os.path as osp
 
-    root, _ = osp.splitext(zip_filepath)
-    tif_path = osp.join(osp.dirname(dest_dir), osp.basename(root) + '.tif')
+count = 0
+progress = 0
 
-    if not osp.exists(tif_path):
-        convert_hgt_to_geotiff(zip_filepath, tif_path)
+zip_fpaths = []
+tif_fpaths = []
+for i, zip_name in enumerate(zip_names):
+    zip_fpath = osp.join(dest_dir, zip_name)
+    zip_fpaths.append(zip_fpath)
+
+    root, _ = osp.splitext(osp.basename(zip_fpath))
+    tif_fpaths.append(
+        osp.join(osp.dirname(dest_dir), root + '.tif'))
+
+multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
 
 
 # %%
@@ -212,7 +219,7 @@ for zip_name in zip_names:
 
 dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
 
-vrt_filename = osp.join(__datadir__, 'dem', "Global.vrt")
+vrt_filename = osp.join(__datadir__, 'dem', "dem_mosaic.vrt")
 ds = gdal.BuildVRT(vrt_filename, dem_filepaths)
 ds.FlushCache()
 del ds

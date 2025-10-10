@@ -15,6 +15,7 @@
 import os
 import os.path as osp
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---- Third party imports
 import rasterio
@@ -63,23 +64,91 @@ def convert_hgt_to_geotiff(
     """
     # Find the .hgt file name inside the zip archive.
     with zipfile.ZipFile(zip_path, 'r') as zf:
+        hgt_filename = None
+        swb_filename = None
         for fname in zf.namelist():
             if fname.lower().endswith('.hgt'):
                 hgt_filename = fname
-                break
-        else:
-            raise FileNotFoundError(f"No .hgt file found in '{zip_path}'.")
+            elif fname.lower().endswith('.swb'):
+                swb_filename = fname
 
-    # Open the .hgt file using rasterio (via GDAL VFS).
+        if hgt_filename is None:
+            raise FileNotFoundError(f"No .hgt file found in '{zip_path}'.")
+        if swb_filename is None:
+            raise FileNotFoundError(f"No .swt file found in '{zip_path}'.")
+
+    # Open the .hgt and .swb file using rasterio (via GDAL VFS).
     vsi_path = f'/vsizip/{zip_path}/{hgt_filename}'
     with rasterio.open(vsi_path) as src:
         profile = src.profile
-        data = src.read(1)
-        profile.update(driver='GTiff')
+        hgt_data = src.read(1)
+
+    vsi_path = f'/vsizip/{zip_path}/{swb_filename}'
+    with rasterio.open(vsi_path) as src:
+        swt_data = src.read(1).astype(hgt_data.dtype)
 
     # Write to GeoTIFF.
+    profile.update(driver='GTiff', count=2, dtype=hgt_data.dtype)
     if compress is not None:
         profile.update(compress=compress)
 
     with rasterio.open(tif_path, 'w', **profile) as dst:
-        dst.write(data, 1)
+        dst.write(hgt_data, 1)
+        dst.write(swt_data, 2)
+
+
+def multi_convert_hgt_to_geotiff(zip_paths: list, tif_paths: list):
+    """
+    Converts multiple NASADEM .hgt ZIP archives to GeoTIFF files in parallel.
+
+    For each ZIP archive in `zip_paths`, this function extracts the .hgt
+    DEM tile and its corresponding surface water mask (.swb), then writes
+    both as bands 1 and 2 of a new GeoTIFF file at the specified path
+    in `tif_paths`.
+
+    Only tiles for which the input ZIP exists and the output TIFF does
+    not exist will be processed.
+
+    Parameters
+    ----------
+    zip_paths : list of str
+        List of paths to input ZIP archives containing
+        NASADEM .hgt and .swb files.
+    tif_paths : list of str
+        List of output paths for the converted GeoTIFF files. Each entry in
+        `tif_paths` should correspond to the respective entry in `zip_paths`.
+    """
+
+    def process_tile(zip_path: str, tif_path: str):
+        convert_hgt_to_geotiff(zip_path, tif_path)
+        return zip_path
+
+    count = 0
+    progress = 0
+    with ThreadPoolExecutor() as executor:
+
+        futures = []
+        for zip_path, tif_path in zip(zip_paths, tif_paths):
+            if not osp.exists(zip_path) or osp.exists(tif_path):
+                continue
+
+            futures.append(executor.submit(
+                process_tile, zip_path, tif_path
+                ))
+
+            count += 1
+
+        if len(futures) == 0:
+            print(f"All {len(zip_paths)} tiles were alreaty converted to tif.")
+        else:
+            print(f"Converting {count} tiles (out of {len(zip_paths)}) "
+                  f"to GeoTIFF...")
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    progress += 1
+                    print(f'Converted {progress} of {count}.')
+            except Exception as exc:
+                print(f'Error: {exc}')
