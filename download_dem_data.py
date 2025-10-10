@@ -87,7 +87,7 @@ blocklisted_tiles = [
 
 
 # Prepare output directory.
-dest_dir = osp.join(__datadir__, 'dem', 'Global', 'hgt')
+dest_dir = osp.join(__datadir__, 'dem', 'raw', 'hgt')
 os.makedirs(dest_dir, exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
@@ -212,7 +212,7 @@ for zip_name in zip_names:
 
 dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
 
-vrt_filename = osp.join(__datadir__, 'dem', "Global.vrt")
+vrt_filename = osp.join(__datadir__, 'dem', "dem_mosaic.vrt")
 ds = gdal.BuildVRT(vrt_filename, dem_filepaths)
 ds.FlushCache()
 del ds
