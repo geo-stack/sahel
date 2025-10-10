@@ -61,7 +61,7 @@ from osgeo import gdal
 
 # ---- Local imports.
 from sahel import __datadir__, CONF
-from sahel.gishelpers import convert_hgt_to_geotiff, get_dem_filepaths
+from sahel.gishelpers import get_dem_filepaths, multi_convert_hgt_to_geotiff
 
 # Define longitude and latitude ranges (covering West Africa)
 LON_MIN = -19
@@ -193,9 +193,6 @@ for i, zip_name in enumerate(zip_names):
 # %%
 
 # Convert hgt files to GeoTiff.
-
-from sahel.gishelpers import multi_convert_hgt_to_geotiff
-import os.path as osp
 
 count = 0
 progress = 0
