@@ -86,7 +86,6 @@ def convert_hgt_to_geotiff(
     with rasterio.open(vsi_path) as src:
         swt_data = src.read(1).astype(hgt_data.dtype)
 
-
     # Write to GeoTIFF.
     profile.update(driver='GTiff', count=2, dtype=hgt_data.dtype)
     if compress is not None:
