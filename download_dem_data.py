@@ -10,7 +10,7 @@
 # =============================================================================
 
 """
-Module for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
+Script for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
 format for the Sahel region.
 
 To use this script, you must have a valid NASA Earthdata account. You will be
@@ -21,11 +21,9 @@ This script automates the process of acquiring, extracting, and converting
 high-resolution Digital Elevation Model (DEM) data from NASA's NASADEM
 dataset
 
-see https://github.com/geo-stack/sahel/pull/5
 
-
-Main Features
--------------
+Script Workflow
+---------------
 - Defines a latitude/longitude bounding box covering all countries of the
   Sahel region of interest.
 - Generates the list of NASADEM tile filenames needed to cover this region.
@@ -39,6 +37,25 @@ Main Features
 - Stores the resulting GeoTIFFs in the 'data/dem/Global/hgt' directory within
   your local Sahel project.
 - Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
+
+
+Rationale for using NASADEM
+---------------------------
+The NASADEM dataset was selected for this project because it provides
+high-resolution, globally available digital elevation data derived from
+the Shuttle Radar Topography Mission (SRTM) and enhanced with additional
+sources and improved processing. NASADEM improves upon the original SRTM
+by offering more complete coverage, fewer voids, and enhanced vertical
+accuracy, which is especially valuable for hydrological, geomorphological,
+and groundwater modeling across large regions like the Sahel. Its native
+resolution of 1 arc-second (~30 meters) is well-suited for regional-scale
+environmental analyses, making it an ideal foundation for extracting
+topographic features, surface water masks, and other terrain variables
+critical to understanding and predicting groundwater resources and
+surface water dynamics in West Africa.
+
+see also https://github.com/geo-stack/sahel/pull/5
+
 
 References
 ----------
@@ -61,7 +78,7 @@ from osgeo import gdal
 
 # ---- Local imports.
 from sahel import __datadir__, CONF
-from sahel.gishelpers import convert_hgt_to_geotiff, get_dem_filepaths
+from sahel.gishelpers import get_dem_filepaths, multi_convert_hgt_to_geotiff
 
 # Define longitude and latitude ranges (covering West Africa)
 LON_MIN = -19
@@ -193,9 +210,6 @@ for i, zip_name in enumerate(zip_names):
 # %%
 
 # Convert hgt files to GeoTiff.
-
-from sahel.gishelpers import multi_convert_hgt_to_geotiff
-import os.path as osp
 
 count = 0
 progress = 0
