@@ -11,8 +11,9 @@
 
 """
 This script mosaics and reprojects DEM and surface water mask raster bands
-for the Sahel region using NASADEM data. It builds VRT mosaics from all tiles,
-then projects:
+for the Sahel region using NASADEM data.
+
+It builds VRT mosaics from all tiles, then projects:
     - DEM (band 1) using bilinear interpolation for smooth elevation
     - Surface water mask (band 2) using nearest neighbor interpolation to
       preserve classes
@@ -20,50 +21,53 @@ then projects:
 All outputs are reprojected to Africa Albers Equal Area Conic (ESRI:102022)
 at 30-meter spatial resolution.
 
-Projection rationale:
-    The NASADEM tiles are natively provided in a geographic coordinate
-    reference system (WGS 84, EPSG:4326), where pixel sizes and tile areas
-    vary with latitude. For any spatial analysis requiring accurate area or
-    distance calculations—such as hydrological modeling, water budget
-    estimation, or geomorphological analysis, it is essential to work in a
-    projected coordinate system with consistent units (meters) and pixel
-    areas. The Africa Albers Equal Area Conic projection (ESRI:102022) is
-    specifically chosen because it minimizes area distortion across the
-    continent, ensuring that each pixel represents a uniform ground area.
-    This is particularly important for continental-scale studies, such as
-    modeling groundwater table depth across the Sahel.
+Projection rationale
+--------------------
+The NASADEM tiles are natively provided in a geographic coordinate
+reference system (WGS 84, EPSG:4326), where pixel sizes and tile areas vary
+with latitude. For any spatial analysis requiring accurate area or distance
+calculations—such as hydrological modeling, water budget estimation, or
+geomorphological analysis—it is essential to work in a projected coordinate
+system with consistent units (meters) and pixel areas. The Africa Albers
+Equal Area Conic projection (ESRI:102022) is specifically chosen because it
+minimizes area distortion across the continent, ensuring that each pixel
+represents a uniform ground area. This is particularly important for
+continental-scale studies, such as modeling groundwater table depth across
+the Sahel.
 
-    Analysis performed on the DEM with Whitebox Tools (such as slope,
-    aspect, flow accumulation, stream extraction, and terrain indices)
-    is used to generate key geomorphological and hydrological features for
-    training our AI model. These features help predict water table depth
-    across the Sahel by quantifying topographic controls on groundwater
-    dynamics. Using an equal-area projection ensures that all derived
-    features (e.g., catchment area, flow length, terrain ruggedness) are
-    spatially consistent and physically meaningful across the region.
+Analysis performed on the DEM with Whitebox Tools (such as slope, aspect,
+flow accumulation, stream extraction, and terrain indices) is used to
+generate key geomorphological and hydrological features for training our AI
+model. These features help predict water table depth across the Sahel by
+quantifying topographic controls on groundwater dynamics. Using an equal-
+area projection ensures that all derived features (e.g., catchment area,
+flow length, terrain ruggedness) are spatially consistent and physically
+meaningful across the region.
 
-    Web Mercator (EPSG:3857) is a commonly used projection for web mapping,
-    but it is not suitable for scientific analysis over large regions because
-    it significantly distorts areas, especially as latitude increases. In
-    contrast, the Africa Albers Equal Area Conic projection preserves areas,
-    making it the appropriate choice for accurate spatial analysis and
-    modeling in Africa.
+Web Mercator (EPSG:3857) is a commonly used projection for web mapping, but
+it is not suitable for scientific analysis over large regions because it
+significantly distorts areas, especially as latitude increases. In contrast,
+the Africa Albers Equal Area Conic projection preserves areas, making it the
+appropriate choice for accurate spatial analysis and modeling in Africa.
 
-Resolution rationale:
-    The 30-meter pixel size is chosen to closely match the native resolution
-    of the NASADEM dataset, which is provided at 1 arc-second (approximately
-    30 meters at the equator). This allows us to preserve the maximum
-    spatial detail available in the source data, ensuring that topographic
-    and hydrological features extracted for machine learning and water table
-    modeling are as accurate and representative as possible for the Sahel
-    region.
+Resolution rationale
+--------------------
+The 30-meter pixel size is chosen to closely match the native resolution of
+the NASADEM dataset, which is provided at 1 arc-second (approximately 30
+meters at the equator). This allows us to preserve the maximum spatial
+detail available in the source data, ensuring that topographic and
+hydrological features extracted for machine learning and water table
+modeling are as accurate and representative as possible for the Sahel
+region.
 
-Requirements:
-    - NASADEM tiles produced with the script 'download_dem_data.py'.
-    - GDAL Python bindings (can be installed with Conda).
+Requirements
+------------
+- NASADEM tiles produced with the script 'download_dem_data.py'.
+- GDAL Python bindings (can be installed with Conda).
 
-Outputs:
-    - VRT and projected GeoTIFF file for each band.
+Outputs
+-------
+- VRT and projected GeoTIFF file for each band.
 """
 
 # ---- Standard imports.
