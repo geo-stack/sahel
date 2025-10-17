@@ -78,7 +78,7 @@ from osgeo import gdal
 
 # ---- Local imports.
 from sahel import __datadir__
-from sahel.gishelpers import get_dem_filepaths
+from sahel.gishelpers import get_dem_filepaths, create_pyramid_overview
 
 gdal.UseExceptions()
 
@@ -141,4 +141,11 @@ if not proj_swb_path.exists():
     del out_ds
 print(f'-> {proj_swb_path}\n')
 
-print('All mosaicking and projection steps completed successfully.')
+print('All mosaicking and projection steps completed successfully.\n')
+
+
+# %%
+
+print(f"Creating a pyramid overview for '{proj_hgt_path.name}'...")
+create_pyramid_overview(proj_hgt_path)
+print("Pyramid overviews created successfully!")

@@ -19,6 +19,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---- Third party imports
 import rasterio
+from osgeo import gdal
+
+gdal.UseExceptions()
 
 
 def get_dem_filepaths(dirname: str) -> list:
@@ -152,3 +155,60 @@ def multi_convert_hgt_to_geotiff(zip_paths: list, tif_paths: list):
                     print(f'Converted {progress} of {count}.')
             except Exception as exc:
                 print(f'Error: {exc}')
+
+
+def create_pyramid_overview(
+        geotif_path: str, overview_levels: list[int] = None):
+    """
+    Create pyramid overviews for a GeoTIFF at specified levels using GDAL.
+
+    Pyramid overviews are reduced-resolution versions of the raster that
+    allow GIS software to display and zoom large rasters much more quickly.
+    They are essential for efficient visualization and navigation of
+    large datasets.
+
+    Parameters
+    ----------
+    geotif_path : str
+        Path to the GeoTIFF file for which to build overviews.
+    overview_levels : list of int, optional
+        List of overview (downsampling) factors to generate overviews at.
+        Each level represents the reduction factor relative to the original
+        resolution. If None, defaults to [2, 4, 8, 16].
+    """
+    if overview_levels is None:
+        overview_levels = [2, 4, 8, 16]
+
+    # Open in update mode so that overviews can be written
+    ds = gdal.Open(geotif_path, gdal.GA_ReadOnly)
+
+    ds.BuildOverviews("average", overview_levels)
+    ds = None
+
+
+def resample_raster(input_path, output_path, target_res=500,
+                    resample_method='average'):
+    """
+    Resample a raster to a target resolution using GDAL.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to input raster (e.g., DEM).
+    output_path : str
+        Path to output resampled raster.
+    target_res : float
+        Target resolution in map units (meters for projected CRS).
+    resample_method : str
+        GDAL resampling method: 'average', 'bilinear', 'nearest', 'cubic', etc.
+        For aggregation, 'average' is recommended.
+    """
+    # Build gdalwarp command
+    gdal.Warp(
+        output_path,
+        input_path,
+        xRes=target_res,
+        yRes=target_res,
+        resampleAlg=resample_method,
+        format='GTiff'
+        )
