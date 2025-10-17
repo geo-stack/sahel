@@ -176,9 +176,6 @@ def create_pyramid_overview(
         Each level represents the reduction factor relative to the original
         resolution. If None, defaults to [2, 4, 8, 16].
     """
-
-    print(f"Creating a pyramid overview for '{geotif_path.name}'...")
-
     if overview_levels is None:
         overview_levels = [2, 4, 8, 16]
 
@@ -187,5 +184,3 @@ def create_pyramid_overview(
 
     ds.BuildOverviews("average", overview_levels)
     ds = None
-
-    print("Pyramid overviews created successfully!")
