@@ -10,15 +10,14 @@
 # =============================================================================
 
 """
-Resample NASADEM and surface water mask rasters to a target resolution of
-250 m for large-scale static water table depth (WTD) modeling in the Sahel.
+Resample the projected (ESRI:102022) NASADEM and surface water mask rasters to
+a target resolution of 250 m for large-scale static water table depth (WTD)
+modeling in the Sahel.
 
-This preprocessing step prepares topographic inputs for a machine learning
-model that predicts regional water table depth. The original dataset
-(NASADEM, 30 m resolution) provides fine-scale elevation detail, but such
-resolution exceeds the needs of this project, which targets semi-regional
-patterns relevant to agricultural water management rather than local WTD
-variations.
+The original dataset (NASADEM, ~30 m resolution at the equator) provides
+fine-scale elevation detail, but such resolution exceeds the needs of this
+project, which targets semi-regional patterns relevant to agricultural
+water management rather than local WTD variations.
 
 Downsampling reduces data volume and computational cost while preserving
 hydrologically meaningful terrain and surface water features. A target
