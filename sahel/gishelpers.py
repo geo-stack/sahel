@@ -58,7 +58,7 @@ def convert_hgt_to_geotiff(
     ----------
     zip_path : str
         Path to the input ZIP archive containing the .hgt DEM tile.
-    dest_dir : str, optional
+    tif_path : str
         Path where to save the GeoTiff file.
     compress : str or None, optional
         Compression method to use for the output GeoTIFF (e.g., 'zstd',
