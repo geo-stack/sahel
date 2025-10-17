@@ -184,3 +184,31 @@ def create_pyramid_overview(
 
     ds.BuildOverviews("average", overview_levels)
     ds = None
+
+
+def resample_raster(input_path, output_path, target_res=500,
+                    resample_method='average'):
+    """
+    Resample a raster to a target resolution using GDAL.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to input raster (e.g., DEM).
+    output_path : str
+        Path to output resampled raster.
+    target_res : float
+        Target resolution in map units (meters for projected CRS).
+    resample_method : str
+        GDAL resampling method: 'average', 'bilinear', 'nearest', 'cubic', etc.
+        For aggregation, 'average' is recommended.
+    """
+    # Build gdalwarp command
+    gdal.Warp(
+        output_path,
+        input_path,
+        xRes=target_res,
+        yRes=target_res,
+        resampleAlg=resample_method,
+        format='GTiff'
+        )
