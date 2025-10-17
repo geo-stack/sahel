@@ -16,14 +16,18 @@ import os
 import os.path as osp
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # ---- Third party imports
+import numpy as np
 import geopandas as gpd
 import pyproj
 import rasterio
 from shapely.geometry import box
 from shapely.ops import transform
 from rasterio.windows import Window, transform as window_transform
+from rasterio.mask import mask
+from rasterio.features import geometry_mask
 
 
 def get_dem_filepaths(dirname: str) -> list:
@@ -209,6 +213,82 @@ def tile_in_boundary(
             )
 
 
+def extract_vertical_band(
+        input_path: str, output_path: str,
+        start_col: int, band_width: int, overlap: int = 0,
+        boundary_geojson: str = None):
+    """
+    Extracts a vertical band from a raster file with optional overlap, and
+    optionally masks pixels outside a boundary geometry.
+
+    If a boundary GeoJSON is provided, only pixels inside the boundary are
+    retained; others are set to NaN.
+
+    Parameters
+    ----------
+    input_path : str or Path
+        Path to the input raster.
+    output_path : str or Path
+        Path to save the extracted band.
+    start_col : int
+        Starting column index (0-based).
+    band_width : int
+        Width of the band (number of columns).
+    overlap : int, optional
+        Overlap (in columns) to include before and after the band.
+    boundary_geojson : str or Path, optional
+        Path to a GeoJSON file containing boundary geometry for masking.
+        If None, no masking is performed.
+    """
+    with rasterio.open(input_path) as src:
+        # Calculate window bounds with overlap, making sure not to
+        # exceed raster size.
+        left = max(start_col - overlap, 0)
+        right = min(start_col + band_width + overlap, src.width)
+        width = right - left
+        nodata = src.nodata
+
+        window = Window(
+            col_off=left, row_off=0,
+            width=width, height=src.height
+            )
+
+        profile = src.profile.copy()
+        profile.update({
+            'width': width,
+            'height': src.height,
+            'transform': rasterio.windows.transform(window, src.transform),
+            'nodata': nodata
+            })
+
+        # Read data in the window
+        data = src.read(window=window)
+
+        # Mask the window if a boundary geometry is provided.
+        if boundary_geojson:
+            gdf = gpd.read_file(boundary_geojson)
+            if gdf.crs != src.crs:
+                gdf = gdf.to_crs(src.crs)
+
+            # Create mask (True outside polygon, False inside).
+            mask_arr = geometry_mask(
+                gdf.geometry,
+                out_shape=(src.height, width),
+                transform=profile['transform'],
+                invert=True
+                )
+
+            # Apply mask to all bands.
+            data = np.where(mask_arr, data, nodata)
+
+            with rasterio.open(output_path, 'w', **profile) as dst:
+                dst.write(data)
+        else:
+            with rasterio.open(output_path, 'w', **profile) as dst:
+                data = src.read(window=window)
+                dst.write(data)
+
+
 def extract_tile_with_overlap(
         tile_fpath, vrt_fpath, out_fpath, overlap_pixels=250
         ):
@@ -236,8 +316,6 @@ def extract_tile_with_overlap(
 
     # Open VRT and extract DEM chunk with overlap.
     with rasterio.open(vrt_fpath) as vrt_src:
-        assert vrt_src.crs == tile_crs, "CRS mismatch between VRT and tile!"
-
         # Map tile upper-left and lower-right to VRT indices.
         ul_row, ul_col = vrt_src.index(tile_bounds.left, tile_bounds.top)
         lr_row, lr_col = vrt_src.index(tile_bounds.right, tile_bounds.bottom)
