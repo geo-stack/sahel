@@ -10,43 +10,21 @@
 # =============================================================================
 
 # ---- Standard imports.
-import os.path as osp
-
-
-# ---- Third party imports.
-import pandas as pd
-import geopandas as gpd
-
+from pathlib import Path
 
 # ---- Local imports.
 from sahel import __datadir__
+from sahel.geometry import buffer_geometry, create_unified_geometry
 
-gadm_dirpath = osp.join(__datadir__, 'gadm')
+dst_crs = 'ESRI:102022'    # Africa Albers Equal Area Conic
+buffer_dist = 100 * 10**3  # in meters
 
-geojson_files = [
-    "Togo_gadm41_0.json",
-    "Benin_gadm41_0.json",
-    "Burkina_gadm41_0.json",
-    "Chad_gadm41_0.json",
-    "Guinea_gadm41_0.json",
-    "Mali_gadm41_0.json",
-    "Mauritania_gadm41_0.json",
-    "Niger_gadm41_0.json",
-    "Senegal_gadm41_0.json"
-    ]
+boundary_path = Path(__datadir__) / 'gadm' / 'unified_boundary.json'
+if not boundary_path.exists():
+    create_unified_geometry(boundary_path, dst_crs)
 
-# Concatenate into a single GeoDataFrame.
-gdfs = [gpd.read_file(osp.join(gadm_dirpath, f)) for f in geojson_files]
-crs = gdfs[0].crs
-
-gdf_all = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=crs)
-
-# Dissolve into a single geometry (union of all shapes).
-unified_boundary = gdf_all.union_all()
-
-# Save boundary to geojson file.
-gdf_unified_boundary = gpd.GeoSeries(unified_boundary, crs=crs)
-
-gdf_unified_boundary.to_file(
-    osp.join(gadm_dirpath, "unified_boundary.json"),
-    driver="GeoJSON")
+buff_geo_path = (
+    boundary_path.parent / f'buffered_boundary_{int(buffer_dist/1000)}km.json'
+    )
+if not buff_geo_path.exists():
+    buffer_geometry(boundary_path, buff_geo_path, buffer_dist)
