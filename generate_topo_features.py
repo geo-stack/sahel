@@ -209,64 +209,8 @@ for threshold in thresholds:
             output=output
             )
 
-# # Invert DEM for ridges extraction and related features.
-# inv_dem_path = feat_path / 'dem_inverted.tif'
-# if not inv_dem_path.exists() or OVERWRITE:
-#     wbt.multiply(
-#         input1=masked_dem_path,
-#         input2=-1.0,
-#         output=inv_dem_path
-#         )
-
-# # Fill deperessions in inverted DEM.
-# inv_filled_dem_path = feat_path / 'dem_inverted_filled.tif'
-# if not inv_filled_dem_path.exists() or OVERWRITE:
-#     wbt.fill_depressions_wang_and_liu(
-#         dem=inv_dem_path,
-#         output=inv_filled_dem_path,
-#         )
-
-# # Calculate inverted D8 flow accumulation.
-# inv_d8_flow_acc_path = feat_path / 'd8_flow_acc_inverted.tif'
-# if not inv_d8_flow_acc_path.exists() or OVERWRITE:
-#     wbt.d8_flow_accumulation(
-#         i=inv_filled_dem_path,
-#         output=inv_d8_flow_acc_path,
-#         out_type='cells'
-#         )
-
 # Extract ridges and related features.
 
-# elev_relative_to_watershed_min_max
-# subbasins
-
-# thresholds = [2200, 7553, 23684]  # basin level 10, 8, 7
-# for threshold in thresholds:
-#     ridges_path = feat_path / f'ridges_at_{threshold}.tif'
-#     if not ridges_path.exists() or OVERWRITE:
-#         wbt.extract_streams(
-#             flow_accum=inv_d8_flow_acc_path,
-#             output=ridges_path,
-#             threshold=threshold
-#             )
-
-#     # Calculate upslope distance to ridge.
-#     output = feat_path / f'upslope_distance_to_ridge_at_{threshold}.tif'
-#     if not output.exists() or OVERWRITE:
-#         wbt.downslope_distance_to_stream(
-#             dem=inv_filled_dem_path,
-#             streams=ridges_path,
-#             output=output
-#             )
-
-#     # Calculate elevation below ridge.
-#     output = feat_path / f'elevation_below_ridge_at_{threshold}.tif'
-#     if not output.exists() or OVERWRITE:
-#         wbt.elevation_above_stream(
-#             dem=inv_filled_dem_path,
-#             streams=ridges_path,
-#             output=output,
-#             )
 
 # %%
 
