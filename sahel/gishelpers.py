@@ -348,3 +348,48 @@ def extract_tile(
     return output_tile
 
 
+def crop_tile(
+        input_tile: Path,
+        output_tile: Path,
+        crop_x_offset: int,
+        crop_y_offset: int,
+        width: int,
+        height: int,
+        overwrite: bool = False
+        ) -> Path:
+    """
+    Crop overlap margins from a processed tile.
+
+    Parameters
+    ----------
+    input_tile : Path
+        Path to the tile with overlap.
+    output_tile : Path
+        Path where the cropped tile will be saved.
+    crop_x_offset : int
+        Number of pixels to skip from left edge.
+    crop_y_offset : int
+        Number of pixels to skip from top edge.
+    width : int
+        Width of the cropped tile in pixels.
+    height : int
+        Height of the cropped tile in pixels.
+    overwrite : bool, optional
+        Whether to overwrite existing output. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to the cropped tile.
+    """
+    if not output_tile.exists() or overwrite:
+        gdal.Translate(
+            str(output_tile),
+            str(input_tile),
+            srcWin=[crop_x_offset, crop_y_offset, width, height],
+            creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
+            )
+
+    return output_tile
+
+
