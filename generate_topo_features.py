@@ -55,173 +55,169 @@
 # hydrological sinks that must be preserved.
 """
 
+# https://www.whiteboxgeo.com/manual/wbw-user-manual/book/tool_help.html
+
 # ---- Standard imports
 
 # ---- Third party imports
-import rasterio
-from rasterio.features import geometry_mask
-import numpy as np
-import geopandas as gpd
 import whitebox
 
 # ---- Local imports
 from sahel import __datadir__ as datadir
+from sahel.gishelpers import(
+    generate_tiles_bbox, get_dem_filepaths, create_pyramid_overview,
+    extract_tile, crop_tile, mosaic_tiles)
 
 wbt = whitebox.WhiteboxTools()
 
-# %% Mask DEM to study area (with buffer)
-
-print('Masking DEM to study area...')
-
-study_area_gdf = gpd.read_file(
-    datadir / 'gadm' / 'buffered_boundary_100km.json'
-    )
-
-mask_path = datadir / 'gadm' / 'buffered_boundary_100km.json'
-dem_path = datadir / 'dem' / 'projected_mosaic_hgt.tif'
-masked_dem_path = datadir / 'dem' / 'dem_30m_masked.tif'
-
-
-if not masked_dem_path.exists():
-    with rasterio.open(dem_path, 'r') as src:
-        if study_area_gdf.crs != src.crs:
-            raise ValueError('Boundary crs does not match that of the DEM.')
-
-        # Create mask (True outside polygon, False inside).
-        mask_arr = geometry_mask(
-            study_area_gdf.geometry,
-            out_shape=(src.height, src.width),
-            transform=src.profile['transform'],
-            invert=True
-            )
-
-        # Apply mask to all bands.
-        data = src.read()
-        data = np.where(mask_arr, data, src.nodata)
-
-        with rasterio.open(masked_dem_path, 'w', **src.profile) as dst:
-            dst.write(data)
-
-# %% Generate features from topo
-
+# =============================================================================
+# User inputs
+# =============================================================================
 OVERWRITE = False
 
-wbt = whitebox.WhiteboxTools()
+DEM_PATH = datadir / 'merit' / 'elv_mosaic.tiff'
 
-# https://www.whiteboxgeo.com/manual/wbw-user-manual/book/tool_help.html
+FEATURES_PATH = datadir / 'merit' / 'features'
+FEATURES_PATH.mkdir(parents=True, exist_ok=True)
 
-feat_path = datadir / 'dem' / 'features (250m)'
-feat_path.mkdir(parents=True, exist_ok=True)
+TILES_OVERLAP_DIR = FEATURES_PATH / 'tiles (overlapped)'
+TILES_OVERLAP_DIR.mkdir(exist_ok=True)
 
-# Fill deperessions.
-filled_dem_path = feat_path / 'dem_filled.tif'
-if not filled_dem_path.exists() or OVERWRITE:
-    wbt.fill_depressions_wang_and_liu(
-        dem=masked_dem_path,
-        output=filled_dem_path,
+TILES_CROPPED_DIR = FEATURES_PATH / 'tiles (cropped)'
+TILES_CROPPED_DIR.mkdir(exist_ok=True)
+
+
+# %% Process topo-driven features
+
+tiles_bbox = generate_tiles_bbox(
+    input_raster=DEM_PATH,
+    tile_size=5000,
+    overlap=100
+    )
+
+tile_count = 0
+total_tiles = len(tiles_bbox)
+wbt.verbose = False
+for (ty, tx), tile_bbox_data in tiles_bbox.items():
+    tile_key = (ty, tx)
+    tile_count += 1
+    progress = f"[{tile_count:02d}/{total_tiles}]"
+    tile_paths = {}
+
+    crop_kwargs = {
+        'crop_x_offset': tile_bbox_data['crop_x_offset'],
+        'crop_y_offset': tile_bbox_data['crop_y_offset'],
+        'width': tile_bbox_data['core'][2],
+        'height': tile_bbox_data['core'][3],
+        'overwrite': OVERWRITE
+        }
+
+    # Helper to process a feature.
+    def process_feature(name, wbt_func, wbt_kwargs):
+        tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+
+        overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
+        overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not overlap_tile_path.exists() or OVERWRITE:
+            wbt_func(output=str(overlap_tile_path), **wbt_kwargs)
+
+            cropped_tile_path = TILES_CROPPED_DIR / name / tile_name
+            cropped_tile_path.parent.mkdir(parents=True, exist_ok=True)
+
+            crop_tile(overlap_tile_path, cropped_tile_path, **crop_kwargs)
+
+        return overlap_tile_path
+
+    # =========================================================================
+    # Extract DEM tile (with overlap)
+    # =========================================================================
+    name = 'dem'
+    print(f"{progress} Extracting {name} tile {tile_key}...")
+    dem_tile_path = TILES_OVERLAP_DIR / f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    extract_tile(
+        input_raster=DEM_PATH,
+        output_tile=dem_tile_path,
+        bbox=tile_bbox_data['overlap'],
+        overwrite=OVERWRITE
         )
+    tile_paths[name] = str(dem_tile_path)
 
-# Calculate local slope.
-slope_path = feat_path / 'slope.tif'
-if not slope_path.exists() or OVERWRITE:
-    wbt.slope(
-        dem=filled_dem_path,
-        output=slope_path
+    # =========================================================================
+    # Calculate features
+    # =========================================================================
+    wtb_func_kwargs = {
+        'slope': {
+            'wbt_func': wbt.slope,
+            'wbt_kwargs': {'dem': tile_paths['dem']}},
+        'curvature': {
+            'wbt_func': wbt.profile_curvature,
+            'wbt_kwargs': {'dem': tile_paths['dem']}},
+        'd8_pointer': {
+            'wbt_func': wbt.d8_pointer,
+            'wbt_kwargs': {'dem': tile_paths['dem']}},
+        'd8_flow_acc': {
+            'wbt_func': wbt.d8_flow_accumulation,
+            'wbt_kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
+        }
+
+    for name in wtb_func_kwargs.keys():
+        print(f"{progress} Computing {name} for tile {tile_key}...")
+        wbt_func = wtb_func_kwargs[name]['wbt_func']
+        wbt_kwargs = wtb_func_kwargs[name]['wbt_kwargs']
+        tile_paths[name] = process_feature(name, wbt_func, wbt_kwargs)
+
+    name = 'wetness_index'
+    print(f"{progress} Computing {name} for tile {tile_key}...")
+    wbt_func = wbt.wetness_index
+    wbt_kwargs = {'sca': tile_paths['d8_flow_acc'],
+                  'slope': tile_paths['slope']}
+    tile_paths[name] = process_feature(name, wbt_func, wbt_kwargs)
+
+
+# %% Mosaic tiles back together
+
+names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index']
+for i, name in enumerate(names):
+    print(f"[{i+1:02d}] Mosaicing {name} tiles...")
+    mosaic_path = FEATURES_PATH / f'{name}.tif'
+    mosaic_tiles(
+        tile_paths=get_dem_filepaths(TILES_CROPPED_DIR / name),
+        output_raster=mosaic_path,
+        overwrite=OVERWRITE,
+        cleanup_tiles=False
         )
-
-# Calculate profile curvature.
-curvature_path = feat_path / 'curvature.tif'
-if not curvature_path.exists() or OVERWRITE:
-    wbt.profile_curvature(
-        dem=filled_dem_path,
-        output=curvature_path
-        )
-
-# Calculate D8 pointer.
-d8_pointer_path = feat_path / 'd8_pointer.tif'
-if not d8_pointer_path.exists() or OVERWRITE:
-    wbt.d8_pointer(
-        dem=filled_dem_path,
-        output=d8_pointer_path
-        )
-
-# Calculate D8 flow accumulation.
-d8_flow_acc_path = feat_path / 'd8_flow_acc.tif'
-if not d8_flow_acc_path.exists() or OVERWRITE:
-    wbt.d8_flow_accumulation(
-        i=filled_dem_path,
-        output=d8_flow_acc_path,
-        out_type='cells'
-        )
-
-# Calculate the Topographic Wetness Index.
-
-# TWI combines two important controls on local saturation: upstream
-# contributing area (As) and local slope (β): TI = ln(As / tan β).
-# That single index therefore captures both accumulation potential (As) and
-# drainage ability (slope).
-
-# TWI (implicitly) captures :
-# - accumulation tendency (via As),  which correlates
-#   with being “downhill / near drainage”
-# - Local drainage potential (via slope)
-# - Broad-scale wetness-prone locations (valleys, concavities).
-
-wetness_index_path = feat_path / 'wetness_index.tif'
-if not wetness_index_path.exists() or OVERWRITE:
-    wbt.wetness_index(
-        sca=d8_flow_acc_path,
-        slope=slope_path,
-        output=wetness_index_path)
-
-# Extract streams and related features.
-thresholds = [2200, 7553, 23684]  # basin level 10, 8, 7
-for threshold in thresholds:
-    streams_path = feat_path / f'streams_at_{threshold}.tif'
-    if not streams_path.exists() or OVERWRITE:
-        wbt.extract_streams(
-            flow_accum=d8_flow_acc_path,
-            output=streams_path,
-            threshold=threshold
-            )
-
-    output = feat_path / f'downslope_distance_to_stream_at_{threshold}.tif'
-    if not output.exists() or OVERWRITE:
-        wbt.downslope_distance_to_stream(
-            dem=filled_dem_path,
-            streams=streams_path,
-            output=output
-            )
-
-    output = feat_path / f'elevation_above_stream_at_{threshold}.tif'
-    if not output.exists() or OVERWRITE:
-        wbt.elevation_above_stream(
-            dem=filled_dem_path,
-            streams=streams_path,
-            output=output,
-            )
-
-    output = feat_path / f'subbasins_at_{threshold}.tif'
-    if not output.exists() or OVERWRITE:
-        wbt.subbasins(
-            d8_pntr=d8_pointer_path,
-            streams=streams_path,
-            output=output
-            )
-
-# Extract ridges and related features.
-
+    create_pyramid_overview(mosaic_path, overwrite=OVERWRITE)
 
 # %%
+# # Calculate the Topographic Wetness Index.
 
-# sigma=1 is mild smoothing (~3×3 pixel influence).
-# Increase to 2–3 only if DEM is very noisy.
-# Default value used in WhiteboxTools is 0.75.
+# # TWI combines two important controls on local saturation: upstream
+# # contributing area (As) and local slope (β): TI = ln(As / tan β).
+# # That single index therefore captures both accumulation potential (As) and
+# # drainage ability (slope).
 
-# print('Smoothing DEM...', flush=True)
-# smooth_dem_path = feat_path / 'mosaic_hgt_250m_smooth.tif'
-# wbt.gaussian_filter(
-#     i=filled_dem_path,
-#     output=smooth_dem_path,
-#     sigma=0.75,
-#     )
+# # TWI (implicitly) captures :
+# # - accumulation tendency (via As),  which correlates
+# #   with being “downhill / near drainage”
+# # - Local drainage potential (via slope)
+# # - Broad-scale wetness-prone locations (valleys, concavities).
+
+# # Extract streams and subasins.
+# thresholds = [2200, 7553, 23684]  # basin level 10, 8, 7
+# for threshold in thresholds:
+#     streams_path = feat_path / f'streams_{threshold}.tif'
+#     if not streams_path.exists() or OVERWRITE:
+#         wbt.extract_streams(
+#             flow_accum=d8_flow_acc_path,
+#             output=streams_path,
+#             threshold=threshold
+#             )
+
+#     output = feat_path / f'subbasins_{threshold}.tif'
+#     if not output.exists() or OVERWRITE:
+#         wbt.subbasins(
+#             d8_pntr=d8_pointer_path,
+#             streams=streams_path,
+#             output=output
+#             )
