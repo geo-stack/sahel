@@ -393,3 +393,55 @@ def crop_tile(
     return output_tile
 
 
+def mosaic_tiles(
+        tile_paths: list,
+        output_raster: Path,
+        overwrite: bool = False,
+        cleanup_tiles: bool = False
+        ) -> Path:
+    """
+    Mosaic tiles into a single raster using GDAL VRT and translate.
+
+    Parameters
+    ----------
+    tile_paths : list
+        List of Path objects pointing to tiles to mosaic.
+    output_raster : Path
+        Path where the mosaiced raster will be saved.
+    overwrite : bool, optional
+        Whether to overwrite existing output. Default is False.
+    cleanup_tiles : bool, optional
+        Whether to delete tiles after mosaicing. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to the output mosaiced raster.
+    """
+    if output_raster.exists() and not overwrite:
+        return output_raster
+
+    # Build VRT.
+    vrt_path = output_raster.with_suffix('.vrt')
+    gdal.BuildVRT(str(vrt_path), tile_paths)
+
+    # Translate to GeoTIFF.
+    gdal.Translate(
+        str(output_raster),
+        str(vrt_path),
+        creationOptions=[
+            'COMPRESS=LZW',
+            'TILED=YES',
+            'BIGTIFF=YES',
+            'NUM_THREADS=ALL_CPUS'
+        ]
+    )
+
+    # Cleanup.
+    vrt_path.unlink(missing_ok=True)
+
+    if cleanup_tiles:
+        for tile in tile_paths:
+            tile.unlink(missing_ok=True)
+
+    return output_raster
