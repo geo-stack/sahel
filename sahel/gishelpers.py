@@ -158,7 +158,8 @@ def multi_convert_hgt_to_geotiff(zip_paths: list, tif_paths: list):
 
 
 def create_pyramid_overview(
-        geotif_path: str, overview_levels: list[int] = None):
+        geotif_path: str, overview_levels: list[int] = None,
+        overwrite: bool = False):
     """
     Create pyramid overviews for a GeoTIFF at specified levels using GDAL.
 
@@ -176,6 +177,9 @@ def create_pyramid_overview(
         Each level represents the reduction factor relative to the original
         resolution. If None, defaults to [2, 4, 8, 16].
     """
+    if geotif_path.with_suffix('.tif.ovr').exists() and not overwrite:
+        return
+
     if overview_levels is None:
         overview_levels = [2, 4, 8, 16]
 
