@@ -311,3 +311,40 @@ def generate_tiles_bbox(
 
     return tiles_bbox_data
 
+
+def extract_tile(
+        input_raster: Path,
+        output_tile: Path,
+        bbox: list,
+        overwrite: bool = False
+        ) -> Path:
+    """
+    Extract a tile from a raster using pixel coordinates.
+
+    Parameters
+    ----------
+    input_raster : Path
+        Path to input raster file.
+    output_tile : Path
+        Path where the extracted tile will be saved.
+    bbox : list
+        Bounding box as [x_start, y_start, width, height] in pixel coordinates.
+    overwrite : bool, optional
+        Whether to overwrite existing output. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to the extracted tile.
+    """
+    if not output_tile.exists() or overwrite:
+        gdal.Translate(
+            str(output_tile),
+            str(input_raster),
+            srcWin=bbox,
+            creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
+            )
+
+    return output_tile
+
+
