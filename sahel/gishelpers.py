@@ -12,6 +12,9 @@
 """GIS data manipulation utilities."""
 
 # ---- Standard imports
+import itertools
+from pathlib import Path
+import math
 import os
 import os.path as osp
 import zipfile
@@ -216,3 +219,95 @@ def resample_raster(input_path, output_path, target_res=500,
         resampleAlg=resample_method,
         format='GTiff'
         )
+
+
+def generate_tiles_bbox(
+        input_raster: Path,
+        tile_size: int = 5000,
+        overlap: int = 100,
+        ) -> dict:
+    """
+    Generate bounding box information for tiling a large raster with overlap.
+
+    Pre-computes the pixel coordinates for a grid of tiles covering the input
+    raster, including both the core (non-overlapping) tile extents and the
+    overlapped extents needed for accurate edge processing.
+
+    Parameters
+    ----------
+    input_raster : Path
+        Path to the input raster file to be tiled.
+    tile_size : int, optional
+        Size of each tile in pixels (width and height of the core tile area,
+        excluding overlap). Default is 5000.
+    overlap : int, optional
+        Number of pixels to overlap between adjacent tiles. This overlap
+        ensures that edge effects are minimized when processing tiles
+        independently. Default is 100.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping tile indices (ty, tx) to tile geometry information.
+        Each entry contains:
+        - 'core': [x_start, y_start, width, height] - Core tile extent without
+          overlap, in pixel coordinates relative to the input raster. Used for
+          the final mosaic.
+        - 'overlap': [x_start, y_start, width, height] - Extended tile extent
+          with overlap, in pixel coordinates. Used for processing to ensure
+          accurate calculations at tile edges.
+        - 'crop_x_offset': int - Number of pixels to skip from the left edge
+          of the overlapped tile to extract the core tile.
+        - 'crop_y_offset': int - Number of pixels to skip from the top edge
+          of the overlapped tile to extract the core tile.
+
+        Note: Tiles smaller than 10x10 pixels are excluded from the output.
+    """
+
+    # Open DEM to get dimensions.
+    ds = gdal.Open(str(input_raster))
+    if ds is None:
+        raise ValueError(f"Cannot open input raster: {input_raster}")
+
+    width = ds.RasterXSize
+    height = ds.RasterYSize
+    ds = None
+
+    # Calculate number of tiles
+    n_tiles_x = math.ceil(width / tile_size)
+    n_tiles_y = math.ceil(height / tile_size)
+
+    tiles_bbox_data = {}
+    for ty, tx in itertools.product(range(n_tiles_y), range(n_tiles_x)):
+        # Calculate the CORE tile extent WITHOUT overlap (for final mosaic).
+        x_start = tx * tile_size
+        y_start = ty * tile_size
+        x_end = min(width, (tx + 1) * tile_size)
+        y_end = min(height, (ty + 1) * tile_size)
+
+        w = x_end - x_start
+        h = y_end - y_start
+
+        # Calculate tile extent WITH overlap for processing
+        x_start_ovlp = max(0, tx * tile_size - overlap)
+        y_start_ovlp = max(0, ty * tile_size - overlap)
+        x_end_ovlp = min(width, (tx + 1) * tile_size + overlap)
+        y_end_ovlp = min(height, (ty + 1) * tile_size + overlap)
+
+        w_ovlp = x_end_ovlp - x_start_ovlp
+        h_ovlp = y_end_ovlp - y_start_ovlp
+
+        # Skip tiny edge tiles. This is ok since the boundary that we used to
+        # clip the DEM had a 100km buffer (~1110 pixels).
+        if w_ovlp < 10 or h_ovlp < 10:
+            continue
+
+        tiles_bbox_data[(ty, tx)] = {
+            'core': [x_start, y_start, w, h],
+            'overlap': [x_start_ovlp, y_start_ovlp, w_ovlp, h_ovlp],
+            'crop_x_offset': x_start - x_start_ovlp,
+            'crop_y_offset': y_start - y_start_ovlp
+            }
+
+    return tiles_bbox_data
+
