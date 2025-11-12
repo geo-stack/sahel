@@ -76,6 +76,7 @@ wbt = whitebox.WhiteboxTools()
 OVERWRITE = False
 
 DEM_PATH = datadir / 'merit' / 'elv_mosaic.tiff'
+STREAMS_PATH = datadir / 'merit' / 'study_area_river_network_var_Dd.tiff'
 
 FEATURES_PATH = datadir / 'merit' / 'features'
 FEATURES_PATH.mkdir(parents=True, exist_ok=True)
@@ -133,14 +134,32 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
     # =========================================================================
     name = 'dem'
     print(f"{progress} Extracting {name} tile {tile_key}...")
-    dem_tile_path = TILES_OVERLAP_DIR / f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
+    overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
     extract_tile(
         input_raster=DEM_PATH,
-        output_tile=dem_tile_path,
+        output_tile=overlap_tile_path,
         bbox=tile_bbox_data['overlap'],
         overwrite=OVERWRITE
         )
-    tile_paths[name] = str(dem_tile_path)
+    tile_paths[name] = overlap_tile_path
+
+    # =========================================================================
+    # Extract streams tile (with overlap)
+    # =========================================================================
+    name = 'streams'
+    print(f"{progress} Extracting {name} tile {tile_key}...")
+    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
+    overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
+    extract_tile(
+        input_raster=STREAMS_PATH,
+        output_tile=overlap_tile_path,
+        bbox=tile_bbox_data['overlap'],
+        overwrite=OVERWRITE
+        )
+    tile_paths[name] = overlap_tile_path
 
     # =========================================================================
     # Calculate features
