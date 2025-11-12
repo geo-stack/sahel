@@ -184,3 +184,4 @@ output_path = rasterize_streams(
     all_touched=True,
     overwrite=True
     )
+create_pyramid_overview(output_path)
