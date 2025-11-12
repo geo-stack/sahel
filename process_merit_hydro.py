@@ -19,17 +19,23 @@ from pathlib import Path
 import tarfile
 import os.path as osp
 import shutil
+import zipfile
 
 # ---- Third party imports.
+import rasterio
 from osgeo import gdal
+import pandas as pd
+import geopandas as gpd
 
 # ---- Local imports.
 from sahel import __datadir__ as datadir
-from sahel.gishelpers import get_dem_filepaths, create_pyramid_overview
+from sahel.gishelpers import (
+    get_dem_filepaths, create_pyramid_overview, rasterize_streams)
 
 gdal.UseExceptions()
 
 merit_dir = Path(datadir) / "merit"
+study_area_path = datadir / 'gadm' / 'buffered_boundary_100km.json'
 
 FEATURES = ['elv']
 # dem: multi-error-removed improved-terrain DEM
@@ -40,10 +46,10 @@ FEATURES = ['elv']
 # elv: adjusted elevation
 # dir: flow direction map
 
-# %%
+# %%  Extract merit data
 
 tarpaths = []
-tardir = merit_dir / '__raw__'
+tardir = merit_dir / '__src__'
 for p in tardir.iterdir():
     if p.is_file() and p.suffix == ".tar":
         tarpaths.append(p)
@@ -73,7 +79,7 @@ for i, p in enumerate(tarpaths):
                 shutil.copyfileobj(fp, dst)
 
 
-# %%
+# %% Create mosaic
 
 for feature in FEATURES:
 
@@ -86,21 +92,19 @@ for feature in FEATURES:
         ds.FlushCache()
         del ds
 
-# %%
+# %% Clip and project merit data.
 
 dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
 pixel_size = 90  # 3 arc-second is ~92.77 m at the equator
 
-
 for feature in FEATURES:
     input_vrt = merit_dir / f'{feature}_mosaic.vrt'
-    geojson_file = datadir / 'gadm' / 'buffered_boundary_100km.json'
     output_tif = merit_dir / f'{feature}_mosaic.tiff'
 
     # Set up warp options
     warp_options = gdal.WarpOptions(
         format='GTiff',
-        cutlineDSName=geojson_file,
+        cutlineDSName=study_area_path,
         cropToCutline=True,
         dstSRS=dst_crs,
         dstNodata=-9999,
@@ -117,14 +121,66 @@ for feature in FEATURES:
         print(f"Creating a pyramid overview for the {feature} mosaic...")
         create_pyramid_overview(output_tif)
 
+# Delete virtual mosaics since we won't need them anymore.
+for feature in FEATURES:
+    vrt_path = merit_dir / f'{feature}_mosaic.vrt'
+    vrt_path.unlink()
 
-# %%
-filename = "D:/Projets/sahel/data/dem/raw/NASADEM_HGT_n05e000.tif"
-with rasterio.open(filename) as src:
-    print(f"Data type: {src.dtypes[0]}")  # First band
-    print(f"NoData value: {src.nodata}")
-    print(f"Number of bands: {src.count}")
+# %% Pre-process river network data
 
-    # For all bands:
-    for i, dtype in enumerate(src.dtypes, 1):
-        print(f"Band {i}: {dtype}")
+# Selected zone for wich river network will be extracted.
+# See 'lev02_basin_numbers.jpg' in './sahel/data/merit/lin_et_al_2021'
+RIVERS_ZONE_IDS = [14, 15, 16]
+
+# Paths
+rivers_zip_path = merit_dir / 'lin_et_al_2021/river_network_variable_Dd.zip'
+study_area = gpd.read_file(study_area_path)
+
+# Extract files related to each target zone.
+extract_dir = rivers_zip_path.parent
+
+shp_to_merge = []
+with zipfile.ZipFile(rivers_zip_path, 'r') as zf:
+    for zone_id in RIVERS_ZONE_IDS:
+        # Extract shapefile and all related files (.shx, .dbf, .prj, etc.)
+        base_name = f'pfaf_variable_Dd_{zone_id}'
+        parent_dir = Path('river_network_variable_Dd')
+
+        for fname in zf.namelist():
+            fname_path = Path(fname)
+            if (fname_path.stem, fname_path.parent) == (base_name, parent_dir):
+                dst_path = extract_dir / fname
+                if not dst_path.exists():
+                    zf.extract(fname, str(extract_dir))
+
+        # Read the shapefile.
+        shp_to_merge.append(
+            extract_dir / 'river_network_variable_Dd' / (base_name + '.shp')
+            )
+
+# Read, project, clip and merge the river shp.
+gdf_to_merge = []
+for shp_fpath in shp_to_merge:
+    gdf = gpd.read_file(shp_fpath)
+
+    # Reproject if needed.
+    if gdf.crs != study_area.crs:
+        gdf = gdf.to_crs(study_area.crs)
+
+    gdf_to_merge.append(gdf)
+
+# Merge and save
+rivers_output_gpkg = merit_dir / 'study_area_river_network_var_Dd.gpkg'
+merged_rivers = gpd.GeoDataFrame(pd.concat(gdf_to_merge, ignore_index=True))
+merged_rivers.to_file(rivers_output_gpkg, driver='GPKG')
+
+# rasterize river network data
+output_path = rasterize_streams(
+    vector_path=rivers_output_gpkg,
+    template_raster=merit_dir / 'elv_mosaic.tiff',
+    output_raster=merit_dir / 'study_area_river_network_var_Dd.tiff',
+    background_value=0,
+    attribute='strmOrder',
+    all_touched=True,
+    overwrite=True
+    )
