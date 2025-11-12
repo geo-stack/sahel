@@ -86,14 +86,13 @@ TILES_OVERLAP_DIR.mkdir(exist_ok=True)
 TILES_CROPPED_DIR = FEATURES_PATH / 'tiles (cropped)'
 TILES_CROPPED_DIR.mkdir(exist_ok=True)
 
-
-# %% Process topo-driven features
-
 tiles_bbox = generate_tiles_bbox(
     input_raster=DEM_PATH,
     tile_size=5000,
     overlap=100
     )
+
+# %% Process topo-driven features
 
 tile_count = 0
 total_tiles = len(tiles_bbox)
@@ -113,14 +112,14 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
         }
 
     # Helper to process a feature.
-    def process_feature(name, wbt_func, wbt_kwargs):
+    def process_feature(name, func, **kwargs):
         tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
 
         overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
         overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not overlap_tile_path.exists() or OVERWRITE:
-            wbt_func(output=str(overlap_tile_path), **wbt_kwargs)
+            func(output=str(overlap_tile_path), **kwargs)
 
             cropped_tile_path = TILES_CROPPED_DIR / name / tile_name
             cropped_tile_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,33 +145,33 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
     # =========================================================================
     # Calculate features
     # =========================================================================
-    wtb_func_kwargs = {
+    func_kwargs = {
         'slope': {
-            'wbt_func': wbt.slope,
-            'wbt_kwargs': {'dem': tile_paths['dem']}},
+            'func': wbt.slope,
+            'kwargs': {'dem': tile_paths['dem']}},
         'curvature': {
-            'wbt_func': wbt.profile_curvature,
-            'wbt_kwargs': {'dem': tile_paths['dem']}},
+            'func': wbt.profile_curvature,
+            'kwargs': {'dem': tile_paths['dem']}},
         'd8_pointer': {
-            'wbt_func': wbt.d8_pointer,
-            'wbt_kwargs': {'dem': tile_paths['dem']}},
+            'func': wbt.d8_pointer,
+            'kwargs': {'dem': tile_paths['dem']}},
         'd8_flow_acc': {
-            'wbt_func': wbt.d8_flow_accumulation,
-            'wbt_kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
+            'func': wbt.d8_flow_accumulation,
+            'kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
         }
 
-    for name in wtb_func_kwargs.keys():
+    for name in func_kwargs.keys():
         print(f"{progress} Computing {name} for tile {tile_key}...")
-        wbt_func = wtb_func_kwargs[name]['wbt_func']
-        wbt_kwargs = wtb_func_kwargs[name]['wbt_kwargs']
-        tile_paths[name] = process_feature(name, wbt_func, wbt_kwargs)
+        func = func_kwargs[name]['func']
+        kwargs = func_kwargs[name]['kwargs']
+        tile_paths[name] = process_feature(name, func, **kwargs)
 
     name = 'wetness_index'
     print(f"{progress} Computing {name} for tile {tile_key}...")
-    wbt_func = wbt.wetness_index
-    wbt_kwargs = {'sca': tile_paths['d8_flow_acc'],
-                  'slope': tile_paths['slope']}
-    tile_paths[name] = process_feature(name, wbt_func, wbt_kwargs)
+    func = wbt.wetness_index
+    kwargs = {'sca': tile_paths['d8_flow_acc'],
+              'slope': tile_paths['slope']}
+    tile_paths[name] = process_feature(name, func, **kwargs)
 
 
 # %% Mosaic tiles back together
