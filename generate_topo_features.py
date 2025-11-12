@@ -58,6 +58,7 @@
 # https://www.whiteboxgeo.com/manual/wbw-user-manual/book/tool_help.html
 
 # ---- Standard imports
+from pathlib import Path
 
 # ---- Third party imports
 import whitebox
@@ -67,6 +68,7 @@ from sahel import __datadir__ as datadir
 from sahel.gishelpers import(
     generate_tiles_bbox, get_dem_filepaths, create_pyramid_overview,
     extract_tile, crop_tile, mosaic_tiles)
+from sahel.topo import distance_to_stream, height_above_stream
 
 wbt = whitebox.WhiteboxTools()
 
@@ -177,6 +179,14 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
         'd8_flow_acc': {
             'func': wbt.d8_flow_accumulation,
             'kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
+        'dist_to_stream': {
+            'func': distance_to_stream,
+            'kwargs': {'dem': tile_paths['dem'],
+                       'streams': tile_paths['streams']}},
+        'height_above_stream': {
+            'func': height_above_stream,
+            'kwargs': {'dem': tile_paths['dem'],
+                       'streams': tile_paths['streams']}},
         }
 
     for name in func_kwargs.keys():
@@ -195,7 +205,8 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
 
 # %% Mosaic tiles back together
 
-names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index']
+names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index',
+         'dist_to_stream', 'height_above_stream']
 for i, name in enumerate(names):
     print(f"[{i+1:02d}] Mosaicing {name} tiles...")
     mosaic_path = FEATURES_PATH / f'{name}.tif'
@@ -207,35 +218,15 @@ for i, name in enumerate(names):
         )
     create_pyramid_overview(mosaic_path, overwrite=OVERWRITE)
 
+
 # %%
-# # Calculate the Topographic Wetness Index.
+# TWI combines two important controls on local saturation: upstream
+# contributing area (As) and local slope (β): TI = ln(As / tan β).
+# That single index therefore captures both accumulation potential (As) and
+# drainage ability (slope).
 
-# # TWI combines two important controls on local saturation: upstream
-# # contributing area (As) and local slope (β): TI = ln(As / tan β).
-# # That single index therefore captures both accumulation potential (As) and
-# # drainage ability (slope).
-
-# # TWI (implicitly) captures :
-# # - accumulation tendency (via As),  which correlates
-# #   with being “downhill / near drainage”
-# # - Local drainage potential (via slope)
-# # - Broad-scale wetness-prone locations (valleys, concavities).
-
-# # Extract streams and subasins.
-# thresholds = [2200, 7553, 23684]  # basin level 10, 8, 7
-# for threshold in thresholds:
-#     streams_path = feat_path / f'streams_{threshold}.tif'
-#     if not streams_path.exists() or OVERWRITE:
-#         wbt.extract_streams(
-#             flow_accum=d8_flow_acc_path,
-#             output=streams_path,
-#             threshold=threshold
-#             )
-
-#     output = feat_path / f'subbasins_{threshold}.tif'
-#     if not output.exists() or OVERWRITE:
-#         wbt.subbasins(
-#             d8_pntr=d8_pointer_path,
-#             streams=streams_path,
-#             output=output
-#             )
+# TWI (implicitly) captures :
+# - accumulation tendency (via As),  which correlates
+#   with being “downhill / near drainage”
+# - Local drainage potential (via slope)
+# - Broad-scale wetness-prone locations (valleys, concavities).
