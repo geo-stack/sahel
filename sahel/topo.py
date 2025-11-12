@@ -10,14 +10,11 @@
 # =============================================================================
 
 # ---- Standard imports.
-import os.path as osp
 from pathlib import Path
 
 # ---- Third party imports.
 import numpy as np
 import rasterio
-import pandas as pd
-import geopandas as gpd
 from scipy.ndimage import distance_transform_edt
 
 # ---- Local imports.
@@ -30,7 +27,7 @@ def distance_to_stream(output: Path, dem: Path, streams: Path):
         meta = src.meta.copy()
         pixel_width = src.transform[0]
         pixel_height = abs(src.transform[4])
-        nodata = src
+        nodata = src.nodata
 
     # Read streams (0 = no stream, >0 = stream).
     with rasterio.open(streams) as src:
