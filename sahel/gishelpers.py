@@ -21,7 +21,9 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---- Third party imports
+import geopandas as gpd
 import rasterio
+from rasterio.features import rasterize
 from osgeo import gdal
 
 gdal.UseExceptions()
@@ -180,6 +182,7 @@ def create_pyramid_overview(
         Each level represents the reduction factor relative to the original
         resolution. If None, defaults to [2, 4, 8, 16].
     """
+    geotif_path = Path(geotif_path)
     if geotif_path.with_suffix('.tif.ovr').exists() and not overwrite:
         return
 
@@ -443,5 +446,93 @@ def mosaic_tiles(
     if cleanup_tiles:
         for tile in tile_paths:
             tile.unlink(missing_ok=True)
+
+    return output_raster
+
+
+def rasterize_streams(
+        vector_path: Path,
+        template_raster: Path,
+        output_raster: Path,
+        burn_value: int = 1,
+        background_value: int = 0,
+        attribute: str = None,
+        all_touched: bool = False,
+        overwrite: bool = False
+        ) -> Path:
+    """
+    Rasterize a vector stream network to match a DEM grid.
+
+    Parameters
+    ----------
+    vector_path : Path
+        Path to vector file (shapefile, geojson, etc.)
+    template_raster : Path
+        Path to DEM or other raster to match (grid, extent, CRS)
+    output_raster : Path
+        Path for output rasterized stream network
+    burn_value : int, optional
+        Value to burn for streams. Default is 1.
+    background_value : int, optional
+        Value for non-stream pixels. Default is 0.
+    attribute : str, optional
+        Vector attribute to use for burn values instead of fixed burn_value.
+        Example: 'stream_order' to burn Strahler order values.
+    all_touched : bool, optional
+        If True, all pixels touched by lines are burned.
+        If False, only pixels whose center is covered. Default is False.
+    overwrite : bool, optional
+        Whether to overwrite existing output. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to output raster
+    """
+    if output_raster.exists() and not overwrite:
+        return output_raster
+
+    # Get grid parameters.
+    with rasterio.open(template_raster) as src:
+        meta = src.meta.copy()
+
+    # Update metadata for output.
+    meta.update({
+        'dtype': 'uint8',
+        'count': 1,
+        'compress': 'lzw',
+        'tiled': True,
+        'nodata': 255
+        })
+
+    # Read streams vector.
+    gdf = gpd.read_file(vector_path)
+
+    invalid_count = (~gdf.geometry.is_valid).sum()
+    empty_count = gdf.geometry.is_empty.sum()
+
+    if invalid_count > 0 or empty_count > 0:
+        gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+
+    # Prepare shapes
+    if attribute:
+        shapes = ((geom, value) for geom, value in
+                  zip(gdf.geometry, gdf[attribute]))
+    else:
+        shapes = ((geom, burn_value) for geom in gdf.geometry)
+
+    # Rasterize
+    burned = rasterize(
+        shapes=shapes,
+        out_shape=(meta['height'], meta['width']),
+        transform=meta['transform'],
+        fill=background_value,
+        all_touched=all_touched,
+        dtype='uint8'
+        )
+
+    # Write output
+    with rasterio.open(output_raster, 'w', **meta) as dst:
+        dst.write(burned, 1)
 
     return output_raster
