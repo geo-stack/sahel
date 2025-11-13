@@ -20,23 +20,16 @@
 
 
 # ---- Standard imports.
-from pathlib import Path
-import tarfile
-import os.path as osp
 import shutil
-import zipfile
 import subprocess
 
 # ---- Third party imports.
 import geopandas as gpd
 from osgeo import gdal
 import pandas as pd
-import rasterio
 
 # ---- Local imports.
 from sahel import __datadir__ as datadir
-from sahel.gishelpers import (
-    get_dem_filepaths, create_pyramid_overview, rasterize_streams)
 
 
 # %% Extract global islands database
