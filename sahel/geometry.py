@@ -85,6 +85,8 @@ def buffer_geometry(
     buffered_gdf = gpd.GeoDataFrame(geometry=buffered_geom)
     buffered_gdf.to_file(output_bath, driver="GeoJSON")
 
+    return buffered_gdf
+
 
 if __name__ == '__main__':
     create_unified_geometry()
