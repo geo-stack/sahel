@@ -25,7 +25,6 @@ import subprocess
 
 # ---- Third party imports.
 import geopandas as gpd
-from osgeo import gdal
 import pandas as pd
 
 # ---- Local imports.
@@ -35,7 +34,6 @@ from sahel import __datadir__ as datadir
 # %% Extract global islands database
 
 print("Extract USGS global islands database...")
-gdal.UseExceptions()
 coast_dir = datadir / 'coastline'
 
 # Extract with 7zip (because zipfile does not support the 'mpk' format)
@@ -63,6 +61,8 @@ result = subprocess.run(
 mpk_path.unlink()
 
 # %% Extract African continent from global dataset
+
+print('Extract African continent from global dataset...')
 
 gdb_path = extract_dir / 'v108/globalislandsfix.gdb'
 
