@@ -19,6 +19,7 @@ from scipy.ndimage import distance_transform_edt
 
 # ---- Local imports
 from sahel import __datadir__ as datadir
+from sahel.gishelpers import create_pyramid_overview
 
 gdal.UseExceptions()
 
@@ -115,3 +116,6 @@ with rasterio.open(output_path, 'w', **profile) as dst:
 # Clean up temporary files.
 temp_with_crs.unlink()
 temp_warped.unlink()
+
+print("Creating a pyramid overview for the  river network...")
+create_pyramid_overview(output_path)
