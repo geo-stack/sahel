@@ -148,7 +148,7 @@ for feature in FEATURES:
 
 # Selected zone for wich river network will be extracted.
 # See 'lev02_basin_numbers.jpg' in './sahel/data/merit/lin_et_al_2021'
-RIVERS_ZONE_IDS = [14, 15, 16]
+RIVERS_ZONE_IDS = [13, 14, 15, 16, 17]
 
 # Paths
 rivers_zip_path = merit_dir / 'lin_et_al_2021/river_network_variable_Dd.zip'
