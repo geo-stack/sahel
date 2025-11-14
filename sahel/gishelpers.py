@@ -492,9 +492,17 @@ def rasterize_streams(
     if output_raster.exists() and not overwrite:
         return output_raster
 
-    # Get grid parameters.
+    # Get grid parameters and nodata mask from template
     with rasterio.open(template_raster) as src:
         meta = src.meta.copy()
+        template_data = src.read(1)
+        template_nodata = src.nodata
+
+    # Create nodata mask from template
+    if template_nodata is not None:
+        nodata_mask = (template_data == template_nodata)
+    else:
+        nodata_mask = None
 
     # Update metadata for output.
     meta.update({
@@ -530,6 +538,10 @@ def rasterize_streams(
         all_touched=all_touched,
         dtype='uint8'
         )
+
+    # Apply nodata mask from template
+    if nodata_mask is not None:
+        burned[nodata_mask] = 255
 
     # Write output
     with rasterio.open(output_raster, 'w', **meta) as dst:
