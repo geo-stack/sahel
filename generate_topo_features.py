@@ -78,7 +78,7 @@ wbt = whitebox.WhiteboxTools()
 OVERWRITE = False
 
 DEM_PATH = datadir / 'merit' / 'elv_mosaic.tiff'
-STREAMS_PATH = datadir / 'merit' / 'study_area_river_network_var_Dd.tiff'
+STREAMS_PATH = datadir / 'merit' / 'river_network_var_Dd.tiff'
 
 FEATURES_PATH = datadir / 'merit' / 'features'
 FEATURES_PATH.mkdir(parents=True, exist_ok=True)
@@ -220,6 +220,7 @@ for i, name in enumerate(names):
 
 
 # %%
+
 # TWI combines two important controls on local saturation: upstream
 # contributing area (As) and local slope (β): TI = ln(As / tan β).
 # That single index therefore captures both accumulation potential (As) and
