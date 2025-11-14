@@ -497,6 +497,7 @@ def rasterize_streams(
         meta = src.meta.copy()
         template_data = src.read(1)
         template_nodata = src.nodata
+        template_crs = src.crs
 
     # Create nodata mask from template
     if template_nodata is not None:
@@ -515,6 +516,8 @@ def rasterize_streams(
 
     # Read streams vector.
     gdf = gpd.read_file(vector_path)
+    if gdf.crs != template_crs:
+        gdf = gdf.to_crs(template_crs)
 
     invalid_count = (~gdf.geometry.is_valid).sum()
     empty_count = gdf.geometry.is_empty.sum()
