@@ -22,9 +22,10 @@ import shutil
 import zipfile
 
 # ---- Third party imports.
+import numpy as np
 from osgeo import gdal
-import pandas as pd
 import geopandas as gpd
+import rasterio
 
 # ---- Local imports.
 from sahel import __datadir__ as datadir
@@ -157,8 +158,7 @@ study_area = gpd.read_file(study_area_path)
 # Extract files related to each target zone.
 extract_dir = rivers_zip_path.parent
 
-print('Processing river network vector layer...')
-
+print('Extracting river network vector layers...')
 shp_to_merge = []
 with zipfile.ZipFile(rivers_zip_path, 'r') as zf:
     for zone_id in RIVERS_ZONE_IDS:
@@ -178,34 +178,54 @@ with zipfile.ZipFile(rivers_zip_path, 'r') as zf:
             extract_dir / 'river_network_variable_Dd' / (base_name + '.shp')
             )
 
-# Read, project, clip and merge the river shp.
-gdf_to_merge = []
+temp_rasters = []
 for shp_fpath in shp_to_merge:
-    gdf = gpd.read_file(shp_fpath)
+    print(f'Rasterizing {shp_fpath.name}...', flush=True)
 
-    # Reproject if needed.
-    if gdf.crs != study_area.crs:
-        gdf = gdf.to_crs(study_area.crs)
+    temp_raster = merit_dir / shp_fpath.name
+    temp_raster = temp_raster.with_suffix('.tiff')
+    temp_rasters.append(temp_raster)
 
-    gdf_to_merge.append(gdf)
+    if temp_raster.exists():
+        continue
 
-# Merge and save
-rivers_output_gpkg = merit_dir / 'river_network_var_Dd.gpkg'
-merged_rivers = gpd.GeoDataFrame(pd.concat(gdf_to_merge, ignore_index=True))
-merged_rivers.to_file(rivers_output_gpkg, driver='GPKG')
+    rasterize_streams(
+        vector_path=shp_fpath,
+        template_raster=merit_dir / 'elv_mosaic.tiff',
+        output_raster=temp_raster,
+        background_value=0,
+        attribute='strmOrder',
+        all_touched=True,
+        overwrite=True
+        )
 
-print('Rasterizing river network...')
+# %%
+print('Writing final rasterized river network...')
 
-# rasterize river network data.
-output_path = rasterize_streams(
-    vector_path=rivers_output_gpkg,
-    template_raster=merit_dir / 'elv_mosaic.tiff',
-    output_raster=merit_dir / 'river_network_var_Dd.tiff',
-    background_value=0,
-    attribute='strmOrder',
-    all_touched=True,
-    overwrite=True
-    )
+with rasterio.open(merit_dir / 'elv_mosaic.tiff') as src:
+    meta = src.meta.copy()
 
-print("Creating a pyramid overview for the  river network...")
-create_pyramid_overview(output_path)
+meta.update({
+    'dtype': 'uint8',
+    'count': 1,
+    'compress': 'lzw',
+    'tiled': True,
+    'nodata': 255
+    })
+
+output_raster = merit_dir / 'river_network_var_Dd.tiff'
+output_array = None
+for temp_raster in temp_rasters:
+    with rasterio.open(temp_raster) as src:
+        burned = src.read(1)
+
+    if output_array is None:
+        output_array = burned
+    else:
+        output_array = np.maximum(output_array, burned)
+
+with rasterio.open(output_raster, 'w', **meta) as dst:
+    dst.write(output_array, 1)
+
+print("Creating a pyramid overview for the river network...")
+create_pyramid_overview(output_raster)
