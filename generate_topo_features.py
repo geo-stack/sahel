@@ -89,6 +89,11 @@ TILES_OVERLAP_DIR.mkdir(exist_ok=True)
 TILES_CROPPED_DIR = FEATURES_PATH / 'tiles (cropped)'
 TILES_CROPPED_DIR.mkdir(exist_ok=True)
 
+MOSAIC_OUTDIR = Path(
+    "G:/Shared drives/2_PROJETS/251230_BanqueMondiale_ML_for_DWL/"
+    "2_TECHNIQUE/5_CARTO/couches"
+    )
+
 tiles_bbox = generate_tiles_bbox(
     input_raster=DEM_PATH,
     tile_size=5000,
@@ -205,18 +210,19 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
 
 # %% Mosaic tiles back together
 
+
 names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index',
          'dist_to_stream', 'height_above_stream']
 for i, name in enumerate(names):
     print(f"[{i+1:02d}] Mosaicing {name} tiles...")
-    mosaic_path = FEATURES_PATH / f'{name}.tif'
+    mosaic_path = MOSAIC_OUTDIR / f'{name}.tif'
     mosaic_tiles(
         tile_paths=get_dem_filepaths(TILES_CROPPED_DIR / name),
         output_raster=mosaic_path,
-        overwrite=OVERWRITE,
+        overwrite=True,
         cleanup_tiles=False
         )
-    create_pyramid_overview(mosaic_path, overwrite=OVERWRITE)
+    create_pyramid_overview(mosaic_path, overwrite=True)
 
 
 # %%
