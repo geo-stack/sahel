@@ -6,12 +6,12 @@ This project aims to leverage geospatial (GIS) and climatic data to build a mach
 
 - **Training Phase:**  
   The model is trained using one-time measurements of water table depth, along with a rich set of environmental features, for observation points located in the following countries:
+  - **Benin**
   - **Burkina Faso**
-  - **Chad**
+  - **Guinea**
   - **Mali**
-  - **Mauritania**
   - **Niger**
-  - **Senegal**
+  - **Togo**
 
   The training data includes:
   - In-situ groundwater measurements.
@@ -20,12 +20,12 @@ This project aims to leverage geospatial (GIS) and climatic data to build a mach
 
 - **Prediction/Application Phase:**  
   The trained model is used to predict water table depth at pre-defined locations classified as rainfed croplands in these countries:
-  - **Benin**
   - **Burkina Faso**
-  - **Guinea**
+  - **Chad**
   - **Mali**
+  - **Mauritania**
   - **Niger**
-  - **Togo**
+  - **Senegal**
 
   The focus on rainfed croplands addresses areas where groundwater accessibility directly impacts agricultural productivity and local communities.
 
