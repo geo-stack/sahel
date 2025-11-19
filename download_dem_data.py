@@ -68,6 +68,7 @@ References
 # ---- Standard imports.
 import os
 import os.path as osp
+from math import floor, ceil
 
 # ---- Third party imports.
 import earthaccess
@@ -75,36 +76,24 @@ from earthaccess.exceptions import LoginAttemptFailure
 import numpy as np
 import keyring
 from osgeo import gdal
+import geopandas as gpd
 
 # ---- Local imports.
-from sahel import __datadir__, CONF
+from sahel import __datadir__ as datadir
+from sahel import CONF
 from sahel.gishelpers import get_dem_filepaths, multi_convert_hgt_to_geotiff
 
-# Define longitude and latitude ranges (covering West Africa)
-LON_MIN = -19
-LON_MAX = 25
-LAT_MIN = 5
-LAT_MAX = 29
-
-
-blocklisted_tiles = [
-    'NASADEM_HGT_n27w015.zip',
-    'NASADEM_HGT_n27w016.zip',
-    'NASADEM_HGT_n27w017.zip',
-    'NASADEM_HGT_n27w018.zip',
-    'NASADEM_HGT_n27w019.zip',
-    'NASADEM_HGT_n28w014.zip',
-    'NASADEM_HGT_n28w015.zip',
-    'NASADEM_HGT_n28w016.zip',
-    'NASADEM_HGT_n28w017.zip',
-    'NASADEM_HGT_n28w018.zip',
-    'NASADEM_HGT_n28w019.zip',
-    'NASADEM_HGT_n29w014.zip',
-    ]
+# Define longitude and latitude ranges (covering the African continent)
+africa_landmass = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
+africa_landmass = africa_landmass.to_crs("EPSG:4326")
+LON_MIN = floor(africa_landmass.bounds.minx[0]) - 1
+LON_MAX = ceil(africa_landmass.bounds.maxx[0]) + 1
+LAT_MIN = floor(africa_landmass.bounds.miny[0]) - 1
+LAT_MAX = ceil(africa_landmass.bounds.maxy[0]) + 1
 
 
 # Prepare output directory.
-dest_dir = osp.join(__datadir__, 'dem', 'raw', 'hgt')
+dest_dir = osp.join(datadir, 'dem', 'raw', 'hgt')
 os.makedirs(dest_dir, exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
@@ -180,10 +169,6 @@ avail_zip_names = [
 missing_tiles = []
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
 for i, zip_name in enumerate(zip_names):
-    if zip_name in blocklisted_tiles:
-        print(f'Skipping tile {i + 1} of {len(zip_names)} '
-              f'because it is blocklisted...')
-        continue
     if zip_name not in avail_zip_names:
         print(f'Skipping tile {i + 1} of {len(zip_names)} '
               f'because it does not exist...')
@@ -231,11 +216,31 @@ multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
 
 # Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
 
-dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
+dem_paths = get_dem_filepaths(osp.dirname(dest_dir))
 
-vrt_filename = osp.join(__datadir__, 'dem', "dem_mosaic.vrt")
-ds = gdal.BuildVRT(vrt_filename, dem_filepaths)
+vrt_path = datadir / 'dem' / 'dem_mosaic.vrt'
+
+ds = gdal.BuildVRT(vrt_path, dem_paths)
 ds.FlushCache()
 del ds
 
-print(f'Virtual dataset generated at {vrt_filename}.')
+
+# Reprojected VRT.
+vrt_reprojected = datadir / 'dem' / 'dem_mosaic_102022.vrt'
+warp_options = gdal.WarpOptions(
+    dstSRS='ESRI:102022',
+    format='VRT',
+    resampleAlg='bilinear',
+    multithread=True,
+    creationOptions=['COMPRESS=DEFLATE']
+    )
+
+ds_reproj = gdal.Warp(
+    str(vrt_reprojected),
+    str(vrt_path),
+    options=warp_options
+    )
+ds_reproj.FlushCache()
+del ds_reproj
+
+print(f'Virtual dataset generated at {vrt_reprojected}.')
