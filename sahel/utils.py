@@ -141,13 +141,33 @@ def plot_wl_hist(df: pd.DataFrame, country: str):
 
 
 if __name__ == '__main__':
-    from sahel import __datadir__
-    import os.path as osp
+    from sahel import __datadir__ as datadir
     countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
     for country in countries:
-        filename = osp.join(__datadir__, 'data', f'{country}.xlsx')
+        filename = osp.join(datadir, 'data', f'{country}.xlsx')
         df = read_obs_wl(filename)
         fig = plot_wl_hist(df, country)
 
-        filepath = osp.join(__datadir__, 'data', f'wl_obs_count_{country}.png')
+        filepath = datadir / 'data' / f'wl_obs_count_{country}.png'
+        if not filepath.exists():
+            fig.savefig(filepath, dpi=220)
+
+    # %%
+
+    countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
+    dfs = []
+    for country in countries:
+        print(f'Loading WTD data for {country}...')
+        filename = datadir / 'data' / f'{country}.xlsx'
+        temp = read_obs_wl(filename)
+        temp['country'] = country
+        dfs.append(temp)
+
+    df = pd.concat(dfs, axis=0, ignore_index=True, sort=False)
+    df = df.reset_index(drop=True)
+
+    fig = plot_wl_hist(df, 'all countries')
+
+    filepath = datadir / 'data' / 'wl_obs_count_all.png'
+    if not filepath.exists():
         fig.savefig(filepath, dpi=220)
