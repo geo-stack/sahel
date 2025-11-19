@@ -10,12 +10,14 @@
 # =============================================================================
 
 # ---- Standard imports.
+from pathlib import Path
 import os.path as osp
 
 
 # ---- Third party imports.
 import pandas as pd
 import geopandas as gpd
+from shapely.geometry import box
 
 
 # ---- Local imports.
@@ -88,5 +90,67 @@ def buffer_geometry(
     return buffered_gdf
 
 
+def create_buffered_bounding_box(
+        points_path: Path | str,
+        output_path: Path | str,
+        buffer_distance: float = 100 * 10**3,
+        overwrite: bool = False) -> Path:
+    """
+    Creates a rectangular study area from GeoJSON points with a buffer.
+
+    Note that input data is automatically reprojected to ESRI:102022 if
+    needed and output is saved in ESRI:102022 to maintain consistency with
+    project data.
+
+    Parameters
+    ----------
+    points_path : Path | str
+        Path to input file containing point features (e.g., water table depth
+        observation points). Supports formats readable by GeoPandas (GeoJSON,
+        Shapefile, GeoPackage, etc.).
+    output_path : Path | str
+        Path where the output GeoJSON file will be saved.
+    buffer_distance : float, optional
+        Buffer distance in meters to expand the bounding box. Default is
+        100,000 m (100 km). Set to 0 for no buffer.
+    overwrite : bool, optional
+        Whether to overwrite existing output. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to the created output file.
+    """
+    points_path = Path(points_path)
+    output_path = Path(output_path)
+
+    pts_gdf = gpd.read_file(points_path)
+
+    target_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
+    if pts_gdf.crs != target_crs:
+        pts_gdf = pts_gdf.to_crs(target_crs)
+
+    # Create a GeoDataFrame with the bounding box of the WTD obs points.
+    bounds = pts_gdf.total_bounds  # (minx, miny, maxx, maxy)
+    bbox = box(*bounds)
+
+    bbox_gdf = gpd.GeoDataFrame([{'geometry': bbox}], crs=target_crs)
+
+    # Apply buffer in meters.
+    if buffer_distance > 0:
+        bbox_gdf['geometry'] = bbox_gdf.geometry.buffer(buffer_distance)
+
+    # Add metadata.
+    bbox_gdf['buffer_meters'] = buffer_distance
+
+    if not output_path.exists() or overwrite is True:
+        bbox_gdf.to_file(output_path, driver='GeoJSON')
+
+    return output_path
+
+
 if __name__ == '__main__':
-    create_unified_geometry()
+    from sahel import __datadir__ as datadir
+    wtd_path = Path(datadir) / 'data' / 'WTD_observations_all.geojson'
+    output_path = Path(datadir) / 'data' / 'WTD_obs_boundary.geojson'
+    create_buffered_bounding_box(wtd_path, output_path)
