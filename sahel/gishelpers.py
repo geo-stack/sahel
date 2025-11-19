@@ -55,7 +55,7 @@ def get_dem_filepaths(dirname: str) -> list:
 
 
 def convert_hgt_to_geotiff(
-        zip_path: str, tif_path: str, compress: str = 'zstd'):
+        zip_path: str, tif_path: str, compress: str = 'LZW'):
     """
     Extracts the .hgt file from a zip archive and converts it to a GeoTIFF.
 
