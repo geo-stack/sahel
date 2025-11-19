@@ -12,7 +12,7 @@
 # ---- Standard imports.
 from pathlib import Path
 import os.path as osp
-
+from math import ceil, floor
 
 # ---- Third party imports.
 import pandas as pd
@@ -94,7 +94,7 @@ def create_buffered_bounding_box(
         points_path: Path | str,
         output_path: Path | str = None,
         buffer_distance: float = 100 * 10**3,
-        overwrite: bool = False) -> Path:
+        ) -> Path:
     """
     Creates a rectangular study area from GeoJSON points with a buffer.
 
@@ -113,8 +113,6 @@ def create_buffered_bounding_box(
     buffer_distance : float, optional
         Buffer distance in meters to expand the bounding box. Default is
         100,000 m (100 km). Set to 0 for no buffer.
-    overwrite : bool, optional
-        Whether to overwrite existing output. Default is False.
 
     Returns
     -------
@@ -135,10 +133,10 @@ def create_buffered_bounding_box(
     # Apply buffer in meters.
     if buffer_distance > 0:
         bounds = (
-            bounds[0] - buffer_distance,  # minx
-            bounds[1] - buffer_distance,  # miny
-            bounds[2] + buffer_distance,  # maxx
-            bounds[3] + buffer_distance   # maxy
+            floor(bounds[0] - buffer_distance),  # minx
+            floor(bounds[1] - buffer_distance),  # miny
+            ceil(bounds[2] + buffer_distance),   # maxx
+            ceil(bounds[3] + buffer_distance)    # maxy
             )
     bbox = box(*bounds)
     bbox_gdf = gpd.GeoDataFrame([{'geometry': bbox}], crs=target_crs)
@@ -146,7 +144,7 @@ def create_buffered_bounding_box(
     # Add metadata.
     bbox_gdf['buffer_meters'] = buffer_distance
 
-    if output_path and not osp.exists(output_path) or overwrite is True:
+    if output_path:
         bbox_gdf.to_file(output_path, driver='GeoJSON')
 
     return bbox_gdf
