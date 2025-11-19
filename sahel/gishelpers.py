@@ -55,7 +55,8 @@ def get_dem_filepaths(dirname: str) -> list:
 
 
 def convert_hgt_to_geotiff(
-        zip_path: str, tif_path: str, compress: str = 'LZW'):
+        zip_path: str, tif_path: str, compress: str = 'LZW',
+        include_swb: bool = False):
     """
     Extracts the .hgt file from a zip archive and converts it to a GeoTIFF.
 
@@ -91,18 +92,24 @@ def convert_hgt_to_geotiff(
         profile = src.profile
         hgt_data = src.read(1)
 
-    vsi_path = f'/vsizip/{zip_path}/{swb_filename}'
-    with rasterio.open(vsi_path) as src:
-        swt_data = src.read(1).astype(hgt_data.dtype)
+    if include_swb:
+        vsi_path = f'/vsizip/{zip_path}/{swb_filename}'
+        with rasterio.open(vsi_path) as src:
+            swt_data = src.read(1).astype(hgt_data.dtype)
 
     # Write to GeoTIFF.
-    profile.update(driver='GTiff', count=2, dtype=hgt_data.dtype)
+    profile.update(
+        driver='GTiff',
+        count=2 if include_swb else 1,
+        dtype=hgt_data.dtype
+        )
     if compress is not None:
         profile.update(compress=compress)
 
     with rasterio.open(tif_path, 'w', **profile) as dst:
         dst.write(hgt_data, 1)
-        dst.write(swt_data, 2)
+        if include_swb:
+            dst.write(swt_data, 2)
 
 
 def multi_convert_hgt_to_geotiff(zip_paths: list, tif_paths: list):
