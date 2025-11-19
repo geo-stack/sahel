@@ -192,6 +192,9 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
             'func': height_above_stream,
             'kwargs': {'dem': tile_paths['dem'],
                        'streams': tile_paths['streams']}},
+        'dinf_flow_acc': {
+            'func': wbt.d_inf_flow_accumulation,
+            'kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
         }
 
     for name in func_kwargs.keys():
@@ -207,21 +210,41 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
               'slope': tile_paths['slope']}
     tile_paths[name] = process_feature(name, func, **kwargs)
 
+    # median basins level 10 to 12 → ~137.5 km² → 16975 cells → ~15 000 cells
+    # median basins level 9 → ~200.9 km² → 24691 cells → ~30 000 cells
+    # median basins level 8 → ~472.1 km² → 58283 cells → ~60 000 cells
+    # median basins level 7 → ~1480.3 km² → 182753 cells → ~180 000 cells
+    # median basins level 6 → ~4433.6 km² → 547283 cells → ~540 000 cells
+
+    thresholds = [15000, 540000]
+    for threshold in thresholds:
+        name = f'streams_{threshold}'
+        print(f"{progress} Computing {name} for tile {tile_key}...")
+        func = wbt.extract_streams
+        kwargs = {'flow_accum': str(tile_paths['d8_flow_acc']),
+                  'threshold': threshold}
+        tile_paths[name] = process_feature(name, func, **kwargs)
+
 
 # %% Mosaic tiles back together
 
 
 names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index',
-         'dist_to_stream', 'height_above_stream']
+         'dist_to_stream', 'height_above_stream', 'dinf_flow_acc',
+         'streams_15000', 'streams_540000']
 for i, name in enumerate(names):
     print(f"[{i+1:02d}] Mosaicing {name} tiles...")
     mosaic_path = MOSAIC_OUTDIR / f'{name}.tif'
+    if mosaic_path.exists() and OVERWRITE is False:
+        continue
+
     mosaic_tiles(
         tile_paths=get_dem_filepaths(TILES_CROPPED_DIR / name),
         output_raster=mosaic_path,
-        overwrite=True,
+        overwrite=False,
         cleanup_tiles=False
         )
+
     create_pyramid_overview(mosaic_path, overwrite=True)
 
 
