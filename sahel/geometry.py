@@ -92,7 +92,7 @@ def buffer_geometry(
 
 def create_buffered_bounding_box(
         points_path: Path | str,
-        output_path: Path | str,
+        output_path: Path | str = None,
         buffer_distance: float = 100 * 10**3,
         overwrite: bool = False) -> Path:
     """
@@ -122,7 +122,6 @@ def create_buffered_bounding_box(
         Path to the created output file.
     """
     points_path = Path(points_path)
-    output_path = Path(output_path)
 
     pts_gdf = gpd.read_file(points_path)
 
@@ -132,25 +131,29 @@ def create_buffered_bounding_box(
 
     # Create a GeoDataFrame with the bounding box of the WTD obs points.
     bounds = pts_gdf.total_bounds  # (minx, miny, maxx, maxy)
-    bbox = box(*bounds)
-
-    bbox_gdf = gpd.GeoDataFrame([{'geometry': bbox}], crs=target_crs)
 
     # Apply buffer in meters.
     if buffer_distance > 0:
-        bbox_gdf['geometry'] = bbox_gdf.geometry.buffer(buffer_distance)
+        bounds = (
+            bounds[0] - buffer_distance,  # minx
+            bounds[1] - buffer_distance,  # miny
+            bounds[2] + buffer_distance,  # maxx
+            bounds[3] + buffer_distance   # maxy
+            )
+    bbox = box(*bounds)
+    bbox_gdf = gpd.GeoDataFrame([{'geometry': bbox}], crs=target_crs)
 
     # Add metadata.
     bbox_gdf['buffer_meters'] = buffer_distance
 
-    if not output_path.exists() or overwrite is True:
+    if output_path and not osp.exists(output_path) or overwrite is True:
         bbox_gdf.to_file(output_path, driver='GeoJSON')
 
-    return output_path
+    return bbox_gdf
 
 
 if __name__ == '__main__':
     from sahel import __datadir__ as datadir
-    wtd_path = Path(datadir) / 'data' / 'WTD_observations_all.geojson'
-    output_path = Path(datadir) / 'data' / 'WTD_obs_boundary.geojson'
-    create_buffered_bounding_box(wtd_path, output_path)
+    wtd_path = Path(datadir) / 'data' / 'wtd_obs_all.geojson'
+    output_path = Path(datadir) / 'data' / 'wtd_obs_boundary.geojson'
+    bbox_gdf = create_buffered_bounding_box(wtd_path, output_path)
