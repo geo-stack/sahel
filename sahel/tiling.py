@@ -128,7 +128,8 @@ def generate_tiles_bbox(
         input_raster: Path,
         tile_size: int = 5000,
         overlap: int = 0,
-        zone_bbox: tuple = None
+        zone_bbox: tuple = None,
+        filter_points_path: Path = None
         ) -> dict:
     """
     Generate bounding box information for tiling a zone within a raster with
@@ -156,6 +157,11 @@ def generate_tiles_bbox(
         (minx, miny, maxx, maxy). Coordinates should match the raster's CRS
         (e.g., ESRI:102022 coordinates in meters). If None, tiles the entire
         raster.
+    filter_points_path : Path, optional
+        Path to a GeoJSON file containing observation points. If provided,
+        only tiles that contain at least one point will be returned.
+        This is useful for skipping empty tiles during processing.
+        Default is None.
 
     Returns
     -------
@@ -176,9 +182,6 @@ def generate_tiles_bbox(
 
         Note: Tiles smaller than 10x10 pixels are excluded from the output.
     """
-    import rasterio
-    from rasterio.windows import from_bounds
-
     # Open raster to get dimensions and transform, then close immediately.
     with rasterio.open(input_raster) as src:
         raster_width = src.width
@@ -237,7 +240,7 @@ def generate_tiles_bbox(
             )
         print(f"Tiling zone: geographic bounds "
               f"({minx:.2f}, {miny:.2f}, {maxx:.2f}, {maxy:.2f})")
-        print(f"            pixel bounds "
+        print(f"             pixel bounds "
               f"({zone_x_min}, {zone_y_min}, {zone_x_max}, {zone_y_max})")
     else:
         # Tile the entire raster.
@@ -297,6 +300,16 @@ def generate_tiles_bbox(
             'crop_x_offset': x_start - x_start_ovlp,
             'crop_y_offset': y_start - y_start_ovlp
             }
+
+    # Filter tiles by points if requested.
+    if filter_points_path is not None:
+        tiles_bbox_data = filter_tiles(
+            input_raster=input_raster,
+            points_path=filter_points_path,
+            tiles_bbox_data=tiles_bbox_data
+            )
+
+    print(f"Generated {len(tiles_bbox_data)} valid tiles.")
 
     return tiles_bbox_data
 
