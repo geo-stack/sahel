@@ -1,4 +1,4 @@
-poc/*
+notebooks/*.py
 .configs/*
 data/chirps/*
 data/dem/*
