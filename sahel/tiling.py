@@ -339,7 +339,7 @@ def extract_tile(
     Path
         Path to the extracted tile.
     """
-    if not output_tile.exists() or overwrite:
+    if not osp.exists(output_tile) or overwrite:
         gdal.Translate(
             str(output_tile),
             str(input_raster),
@@ -384,7 +384,7 @@ def crop_tile(
     Path
         Path to the cropped tile.
     """
-    if not output_tile.exists() or overwrite:
+    if not osp.exists(output_tile) or overwrite:
         gdal.Translate(
             str(output_tile),
             str(input_tile),
@@ -425,22 +425,24 @@ def mosaic_tiles(
 
     # Build VRT.
     vrt_path = output_raster.with_suffix('.vrt')
-    gdal.BuildVRT(str(vrt_path), tile_paths)
+    ds = gdal.BuildVRT(str(vrt_path), tile_paths)
+    ds.FlushCache()
+    del ds
 
-    # Translate to GeoTIFF.
-    gdal.Translate(
-        str(output_raster),
-        str(vrt_path),
-        creationOptions=[
-            'COMPRESS=LZW',
-            'TILED=YES',
-            'BIGTIFF=YES',
-            'NUM_THREADS=ALL_CPUS'
-        ]
-    )
+    if output_raster.name.lower().endswith('.tif'):
+        # Translate to GeoTIFF.
+        gdal.Translate(
+            str(output_raster),
+            str(vrt_path),
+            creationOptions=[
+                'COMPRESS=LZW',
+                'TILED=YES',
+                'BIGTIFF=YES',
+                'NUM_THREADS=ALL_CPUS']
+            )
 
-    # Cleanup.
-    vrt_path.unlink(missing_ok=True)
+        # Cleanup.
+        vrt_path.unlink(missing_ok=True)
 
     if cleanup_tiles:
         for tile in tile_paths:
