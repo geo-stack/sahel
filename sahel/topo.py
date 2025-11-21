@@ -16,8 +16,74 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from scipy.ndimage import distance_transform_edt
+from skimage.morphology import skeletonize, remove_small_objects
 
 # ---- Local imports.
+
+
+def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30):
+    """
+    Extract and skeletonize ridge features from a geomorphons
+    classification raster.
+
+    Identifies ridge pixels from geomorphon classes (flat, peak, ridge),
+    filters by minimum size, and skeletonizes to produce 1-pixel-wide ridge
+    lines suitable for drainage network or topographic analysis.
+
+    Parameters
+    ----------
+    geomorphons : Path
+        Path to geomorphons classification GeoTIFF. Expected to contain integer
+        class values from WhiteboxTools geomorphons analysis (1-10), where:
+        - 1 = Flat
+        - 2 = Peak (summit)
+        - 3 = Ridge
+        Values outside 1-3 and nodata/NaN are treated as non-ridge pixels.
+    output : Path
+        Path for output binary ridge raster. Output is uint8 with values:
+        - 1 = ridge pixel
+        - 0 = non-ridge pixel
+    ridge_size : int, optional
+        Minimum ridge region size in pixels. Connected ridge regions smaller
+        than this threshold are removed before skeletonization. Default is 30.
+
+    References
+    ----------
+    WhiteboxTools Geomorphons documentation:
+    https://www.whiteboxgeo.com/manual/wbt_book/available_tools/geomorphometric_analysis.html#Geomorphons
+
+    """
+
+    with rasterio.open(geomorphons) as src:
+        geomorph_data = src.read(1)
+        profile = src.profile.copy()
+
+    # Handle nan and nodata
+    geomorph_data = np.maximum(geomorph_data, 0)
+    geomorph_data[np.isnan(geomorph_data)] = 0
+
+    # Create ridge mask.
+    mask_ridges = (geomorph_data > 0) & (geomorph_data < 4)
+
+    # Remove small ridge regions.
+    filtered_ridges = remove_small_objects(mask_ridges, min_size=ridge_size)
+
+    # Skeletonize to get 1-pixel-wide ridge lines.
+    thin_ridges = skeletonize(filtered_ridges)
+
+    # Remove tiny skeleton fragments.
+    thin_ridges_cleaned = remove_small_objects(thin_ridges, min_size=2)
+
+    # Convert to uint8 and write output.
+    ridges = thin_ridges_cleaned.astype(np.uint8)
+
+    profile.update(
+        dtype=rasterio.uint8,
+        count=1,
+        compress='deflate'
+        )
+    with rasterio.open(output, 'w', **profile) as dst:
+        dst.write(ridges.astype('int'), 1)
 
 
 def dist_to_streams(dem: Path, streams: Path, output: Path):
