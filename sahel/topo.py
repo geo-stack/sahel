@@ -80,7 +80,8 @@ def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30):
     profile.update(
         dtype=rasterio.uint8,
         count=1,
-        compress='deflate'
+        compress='deflate',
+        nodata=0
         )
     with rasterio.open(output, 'w', **profile) as dst:
         dst.write(ridges.astype('int'), 1)
