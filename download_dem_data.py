@@ -81,7 +81,9 @@ import geopandas as gpd
 # ---- Local imports.
 from sahel import __datadir__ as datadir
 from sahel import CONF
-from sahel.gishelpers import get_dem_filepaths, multi_convert_hgt_to_geotiff
+from sahel.gishelpers import (
+    get_dem_filepaths, multi_convert_hgt_to_geotiff,
+    )
 
 # Define longitude and latitude ranges (covering the African continent)
 africa_landmass = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
@@ -93,8 +95,8 @@ LAT_MAX = ceil(africa_landmass.bounds.maxy[0]) + 1
 
 
 # Prepare output directory.
-dest_dir = osp.join(datadir, 'dem', 'raw', 'hgt')
-os.makedirs(dest_dir, exist_ok=True)
+dest_dir = datadir / 'dem' / 'raw' / '__src__'
+dest_dir.mkdir(exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
 zip_names = []
@@ -177,7 +179,7 @@ for i, zip_name in enumerate(zip_names):
     print(f'Processing tile {i + 1} of {len(zip_names)}...')
 
     url = base_url + zip_name
-    zip_filepath = osp.join(dest_dir, zip_name)
+    zip_filepath = dest_dir / zip_name
 
     # Skip if tile already downloaded.
     if osp.exists(zip_filepath):
@@ -202,7 +204,7 @@ progress = 0
 zip_fpaths = []
 tif_fpaths = []
 for i, zip_name in enumerate(zip_names):
-    zip_fpath = osp.join(dest_dir, zip_name)
+    zip_fpath = dest_dir / zip_name
     zip_fpaths.append(zip_fpath)
 
     root, _ = osp.splitext(osp.basename(zip_fpath))
@@ -215,24 +217,27 @@ multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
 # %%
 
 # Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
-
-dem_paths = get_dem_filepaths(osp.dirname(dest_dir))
-
-vrt_path = datadir / 'dem' / 'dem_mosaic.vrt'
-
+vrt_path = datadir / 'dem' / 'nasadem.vrt'
+dem_paths = get_dem_filepaths(dest_dir.parent)
 ds = gdal.BuildVRT(vrt_path, dem_paths)
 ds.FlushCache()
 del ds
 
+# Reprojected VRT and apply African landmass mask.
 
-# Reprojected VRT.
-vrt_reprojected = datadir / 'dem' / 'dem_mosaic_102022.vrt'
+dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
+pixel_size = 30  # 1 arc-second is ~30 m at the equator
+
+vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
 warp_options = gdal.WarpOptions(
-    dstSRS='ESRI:102022',
+    cutlineDSName=str(datadir / 'coastline' / 'africa_landmass.gpkg'),
+    cropToCutline=False,
+    dstSRS=dst_crs,
     format='VRT',
     resampleAlg='bilinear',
+    xRes=pixel_size,
+    yRes=pixel_size,
     multithread=True,
-    creationOptions=['COMPRESS=DEFLATE']
     )
 
 ds_reproj = gdal.Warp(
