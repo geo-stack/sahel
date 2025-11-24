@@ -21,14 +21,10 @@ from skimage.morphology import skeletonize, remove_small_objects
 # ---- Local imports.
 
 
-def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30):
+def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
+                   flow_acc: Path = None, max_flow_acc: int = 2):
     """
-    Extract and skeletonize ridge features from a geomorphons
-    classification raster.
-
-    Identifies ridge pixels from geomorphon classes (flat, peak, ridge),
-    filters by minimum size, and skeletonizes to produce 1-pixel-wide ridge
-    lines suitable for drainage network or topographic analysis.
+    Extract ridges with a pure geomorphon or a flow accumulation filtering.
 
     Parameters
     ----------
@@ -46,6 +42,13 @@ def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30):
     ridge_size : int, optional
         Minimum ridge region size in pixels. Connected ridge regions smaller
         than this threshold are removed before skeletonization. Default is 30.
+    flow_acc : Path, optional
+        Path to flow accumulation GeoTIFF. If provided, uses flow accumulation
+        filtering instead of skeletonization to thin ridges. If None, applies
+        morphological skeletonization to create 1-pixel-wide ridges.
+    max_flow_acc : int
+        Maximum flow accumulation value for valid ridge pixels. Only used when
+        flow_acc is provided. Typically 1-2 for true ridges. Default is 2.
 
     References
     ----------
@@ -62,20 +65,30 @@ def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30):
     geomorph_data = np.maximum(geomorph_data, 0)
     geomorph_data[np.isnan(geomorph_data)] = 0
 
-    # Create ridge mask.
+    # Create ridge mask (classes 1, 2, 3).
     mask_ridges = (geomorph_data > 0) & (geomorph_data < 4)
 
     # Remove small ridge regions.
     filtered_ridges = remove_small_objects(mask_ridges, min_size=ridge_size)
 
-    # Skeletonize to get 1-pixel-wide ridge lines.
-    thin_ridges = skeletonize(filtered_ridges)
+    # Filter by flow accumulation (optional).
+    if flow_acc is not None:
+        # Method 1: Flow accumulation filtering (hydrological ridges)
+        with rasterio.open(flow_acc) as src:
+            acc_data = src.read(1)
+            acc_data = np.maximum(acc_data, 0)
 
-    # Remove tiny skeleton fragments.
-    thin_ridges_cleaned = remove_small_objects(thin_ridges, min_size=2)
+        # Keep only ridge pixels with low flow accumulation.
+        low_flow_mask = acc_data < max_flow_acc
+        ridges = (filtered_ridges & low_flow_mask).astype(np.uint8)
+    else:
+        # Method 2: Morphological skeletonization (topographic ridges)
 
-    # Convert to uint8 and write output.
-    ridges = thin_ridges_cleaned.astype(np.uint8)
+        # Skeletonize to get 1-pixel-wide ridge lines.
+        thin_ridges = skeletonize(filtered_ridges)
+
+        # Remove tiny skeleton fragments.
+        ridges = remove_small_objects(thin_ridges, min_size=2).astype(np.uint8)
 
     profile.update(
         dtype=rasterio.uint8,
