@@ -246,7 +246,7 @@ def generate_tiles_bbox(
         # Tile the entire raster.
         zone_x_min, zone_y_min = 0, 0
         zone_x_max, zone_y_max = raster_width, raster_height
-        print(f"Tiling entire raster: {raster_width}x{raster_height} pixels")
+        print(f"Tiling entire raster: {raster_width} x {raster_height} pixels")
 
     # Calculate zone dimensions.
     zone_width = zone_x_max - zone_x_min
