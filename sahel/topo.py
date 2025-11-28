@@ -238,7 +238,7 @@ def dist_to_ridges_numba(
                 continue
 
             # Find the topologically nearest ridge.
-            for dr, dc, dist_ in spiral_offsets:
+            for dr, dc, dist_sqrt in spiral_offsets:
 
                 if dr == 0 and dc == 0:
                     # We already did checks for the point itself.
@@ -254,8 +254,11 @@ def dist_to_ridges_numba(
                     # Nearest point is not a ridge.
                     continue
 
-                # If point is a stream, we keep the closest ridge.
+                # If point is a stream, we simply keep the closest ridge.
                 if streams_data[row, col] == 1:
+                    ridge_dist[0, row, col] = (dr**2 + dc**2)**0.5 * pixel_size
+                    ridge_dist[1, row, col] = row + dr
+                    ridge_dist[2, row, col] = col + dc
                     break
 
                 # Check if line from the point to the ridge crosses a stream.
@@ -271,13 +274,10 @@ def dist_to_ridges_numba(
                     continue
                 else:
                     # This candidate is valid, exit spiral search.
+                    ridge_dist[0, row, col] = (dr**2 + dc**2)**0.5 * pixel_size
+                    ridge_dist[1, row, col] = row + dr
+                    ridge_dist[2, row, col] = col + dc
                     break
-            else:
-                continue
-
-            ridge_dist[0, row, col] = (dr**2 + dc**2)**0.5 * pixel_size
-            ridge_dist[1, row, col] = row + dr
-            ridge_dist[2, row, col] = col + dc
 
     return ridge_dist
 
