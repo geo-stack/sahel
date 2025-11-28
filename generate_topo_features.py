@@ -9,119 +9,74 @@
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
-"""
-# https://www.whiteboxgeo.com/manual/wbw-user-manual/book/tool_help.html
-
-# From Jensen et al. (2025)
-# Topography is one of the primary drivers of WTD, with the complex
-# relationship between topography and groundwater recharge (and WTD)
-# depending on how topography interacts with precipitation,
-# evapotranspiration, and geological formations (Moeck et al., 2020).
-
-# Machine learning may provide a strong foundation for exploring and
-# simulating such a complicated relationship. Here, we used different
-# topographical attributes which are known to control recharge and WTD.
-# These attributes include elevation, slope, and topographic index.
-#
-
-# Flow-direction, accumulation, TWI, HAND, and stream networks work best
-# on the unsmoothed filled DEM. Gaussian smoothing should be applied after
-# these indices are computed if the goal is for ML features.
-# Otherwise, flow paths can get unrealistic.
-
-# Recommended workflow
-
-# 1. Start with raw DEM,run fill_depressions_wang_and_liu, produces filled DEM.
-# 2. Compute hydrological layers: flow direction, flow accumulation,
-#    TWI, HAND, streams.
-# 3. Restore water mask (optional) → final DEM for AI features.
-# 4. Apply gaussian_filter only on the DEM used for AI features
-#    (not on the filled DEM used for flow routing).
-# 5. Extract slopes, curvatures, elevation features from this smoothed DEM.
-
-# Both breach_depressions and fill_depressions have the same
-# goal — to remove spurious sinks that break flow continuity —
-# but they achieve it in different ways:
-
-# After this sequence, your dem_filled is hydrologically conditioned — i.e.
-# flow directions can be computed without interruptions.
-# dem = wbe.read_raster(padded_tile_fpath)
-
-# Most large-scale hydrological studies use depression filling
-# (e.g., Wang & Liu, Planchon-Darboux, or Priority-Flood algorithms),
-# which is much faster and scales well.
-
-# Breaching is typically reserved for small areas or when you have true
-# hydrological sinks that must be preserved.
-"""
-
-# https://www.whiteboxgeo.com/manual/wbw-user-manual/book/tool_help.html
-
-# ---- Standard imports
+# ---- Standard imports.
+import math
 from pathlib import Path
+from time import perf_counter
 
-# ---- Third party imports
+# ---- Third party imports.
+import geopandas as gpd
 import whitebox
 
-# ---- Local imports
+# ---- Local imports.
 from sahel import __datadir__ as datadir
-from sahel.gishelpers import(
-    generate_tiles_bbox, get_dem_filepaths, create_pyramid_overview,
-    extract_tile, crop_tile, mosaic_tiles)
-from sahel.topo import distance_to_stream, height_above_stream
+from sahel.gishelpers import get_dem_filepaths
+from sahel.tiling import (
+    generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles)
+from sahel.topo import dist_to_streams, extract_ridges
+
+
+OVERWRITE = False
+TILES_OVERLAP_DIR = datadir / 'training' / 'tiles (overlapped)'
+TILES_CROPPED_DIR = datadir / 'training' / 'tiles (cropped)'
+
+FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
+            'flow_accum', 'streams', 'geomorphons',
+            'slope', 'curvature', 'dist_stream', 'ridges']
+
+
+# %% Tiling
+
+obs_points_path = datadir / 'data' / 'wtd_obs_all.geojson'
+
+boundary_gdf = gpd.read_file(datadir / 'data' / 'wtd_obs_boundary.geojson')
+zone_bbox = tuple(boundary_gdf.total_bounds)
+
+vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
+
+tiles_bbox_data = generate_tiles_bbox(
+    input_raster=vrt_reprojected,
+    tile_size=5000,
+    overlap=100 * 30,  # 100 pixels at 30 meters resolution
+    filter_points_path=obs_points_path
+    )
+
+
+# %% Computing
 
 wbt = whitebox.WhiteboxTools()
-
-# =============================================================================
-# User inputs
-# =============================================================================
-OVERWRITE = False
-
-DEM_PATH = datadir / 'merit' / 'elv_mosaic.tiff'
-STREAMS_PATH = datadir / 'merit' / 'river_network_var_Dd.tiff'
-
-FEATURES_PATH = datadir / 'merit' / 'features'
-FEATURES_PATH.mkdir(parents=True, exist_ok=True)
-
-TILES_OVERLAP_DIR = FEATURES_PATH / 'tiles (overlapped)'
-TILES_OVERLAP_DIR.mkdir(exist_ok=True)
-
-TILES_CROPPED_DIR = FEATURES_PATH / 'tiles (cropped)'
-TILES_CROPPED_DIR.mkdir(exist_ok=True)
-
-MOSAIC_OUTDIR = Path(
-    "G:/Shared drives/2_PROJETS/251230_BanqueMondiale_ML_for_DWL/"
-    "2_TECHNIQUE/5_CARTO/couches"
-    )
-
-tiles_bbox = generate_tiles_bbox(
-    input_raster=DEM_PATH,
-    tile_size=5000,
-    overlap=100
-    )
-
-# %% Process topo-driven features
+wbt.verbose = False
 
 tile_count = 0
-total_tiles = len(tiles_bbox)
-wbt.verbose = False
-for (ty, tx), tile_bbox_data in tiles_bbox.items():
-    tile_key = (ty, tx)
+total_tiles = len(tiles_bbox_data)
+for tile_key, tile_bbox_data in tiles_bbox_data.items():
+    ty, tx = tile_key
     tile_count += 1
     progress = f"[{tile_count:02d}/{total_tiles}]"
-    tile_paths = {}
 
     crop_kwargs = {
         'crop_x_offset': tile_bbox_data['crop_x_offset'],
         'crop_y_offset': tile_bbox_data['crop_y_offset'],
         'width': tile_bbox_data['core'][2],
         'height': tile_bbox_data['core'][3],
-        'overwrite': OVERWRITE
+        'overwrite': False
         }
+
+    tile_name_template = '{name}_tile_{ty:03d}_{tx:03d}.tif'
 
     # Helper to process a feature.
     def process_feature(name, func, **kwargs):
-        tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+        tile_name = tile_name_template.format(name=name, ty=ty, tx=tx)
 
         overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
         overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,105 +91,84 @@ for (ty, tx), tile_bbox_data in tiles_bbox.items():
 
         return overlap_tile_path
 
-    # =========================================================================
-    # Extract DEM tile (with overlap)
-    # =========================================================================
-    name = 'dem'
-    print(f"{progress} Extracting {name} tile {tile_key}...")
-    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
-    overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
-    overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
-    extract_tile(
-        input_raster=DEM_PATH,
-        output_tile=overlap_tile_path,
-        bbox=tile_bbox_data['overlap'],
-        overwrite=OVERWRITE
-        )
-    tile_paths[name] = overlap_tile_path
+    tile_paths = {}
+    for name in FEATURES:
+        tile_name = tile_name_template.format(name=name, ty=ty, tx=tx)
+        tile_paths[name] = TILES_OVERLAP_DIR / name / tile_name
 
-    # =========================================================================
-    # Extract streams tile (with overlap)
-    # =========================================================================
-    name = 'streams'
-    print(f"{progress} Extracting {name} tile {tile_key}...")
-    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
-    overlap_tile_path = TILES_OVERLAP_DIR / name / tile_name
-    overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
-    extract_tile(
-        input_raster=STREAMS_PATH,
-        output_tile=overlap_tile_path,
-        bbox=tile_bbox_data['overlap'],
-        overwrite=OVERWRITE
-        )
-    tile_paths[name] = overlap_tile_path
-
-    # =========================================================================
-    # Calculate features
-    # =========================================================================
     func_kwargs = {
+        'dem': {
+            'func': lambda output, **kwargs: extract_tile(
+                output_tile=output, **kwargs),
+            'kwargs': {'input_raster': vrt_reprojected,
+                       'bbox': tile_bbox_data['overlap'],
+                       'overwrite': OVERWRITE}
+            },
+        'filled_dem': {
+            'func': wbt.fill_depressions,
+            'kwargs': {'dem': tile_paths['dem']}
+            },
+        'smoothed_dem': {
+            'func': wbt.gaussian_filter,
+            'kwargs': {'i': tile_paths['filled_dem'],
+                       'sigma': 1.0}
+            },
+        'flow_accum': {
+            'func': wbt.d8_flow_accumulation,
+            'kwargs': {'i': tile_paths['smoothed_dem'],
+                       'out_type': 'cells'}
+            },
+        'streams': {
+            'func': wbt.extract_streams,
+            'kwargs': {'flow_accum': tile_paths['flow_accum'],
+                       'threshold': 1500}
+            },
+        'geomorphons': {
+            'func': wbt.geomorphons,
+            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            },
         'slope': {
             'func': wbt.slope,
-            'kwargs': {'dem': tile_paths['dem']}},
+            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            },
         'curvature': {
             'func': wbt.profile_curvature,
-            'kwargs': {'dem': tile_paths['dem']}},
-        'd8_pointer': {
-            'func': wbt.d8_pointer,
-            'kwargs': {'dem': tile_paths['dem']}},
-        'd8_flow_acc': {
-            'func': wbt.d8_flow_accumulation,
-            'kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
-        'dist_to_stream': {
-            'func': distance_to_stream,
-            'kwargs': {'dem': tile_paths['dem'],
-                       'streams': tile_paths['streams']}},
-        'height_above_stream': {
-            'func': height_above_stream,
-            'kwargs': {'dem': tile_paths['dem'],
-                       'streams': tile_paths['streams']}},
-        'dinf_flow_acc': {
-            'func': wbt.d_inf_flow_accumulation,
-            'kwargs': {'i': tile_paths['dem'], 'out_type': 'cells'}},
+            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            },
+        'dist_stream': {
+            'func': dist_to_streams,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'streams': tile_paths['streams']}
+            },
+        'ridges': {
+            'func': extract_ridges,
+            'kwargs': {'geomorphons': tile_paths['geomorphons'],
+                       'ridge_size': 30,
+                       'flow_acc': tile_paths['flow_accum'],
+                       'max_flow_acc': 2}
+
+            },
         }
 
-    for name in func_kwargs.keys():
-        print(f"{progress} Computing {name} for tile {tile_key}...")
+    for name in FEATURES:
+        t0 = perf_counter()
+        print(f"{progress} Computing {name} for tile {tile_key}...", end='')
         func = func_kwargs[name]['func']
         kwargs = func_kwargs[name]['kwargs']
-        tile_paths[name] = process_feature(name, func, **kwargs)
+        process_feature(name, func, **kwargs)
+        t1 = perf_counter()
+        print(f' done in {round(t1 - t0):0.0f} sec')
 
-    name = 'wetness_index'
-    print(f"{progress} Computing {name} for tile {tile_key}...")
-    func = wbt.wetness_index
-    kwargs = {'sca': tile_paths['d8_flow_acc'],
-              'slope': tile_paths['slope']}
-    tile_paths[name] = process_feature(name, func, **kwargs)
+    if tile_count == 3:
+        break
 
-    # median basins level 10 to 12 → ~137.5 km² → 16975 cells → ~15 000 cells
-    # median basins level 9 → ~200.9 km² → 24691 cells → ~30 000 cells
-    # median basins level 8 → ~472.1 km² → 58283 cells → ~60 000 cells
-    # median basins level 7 → ~1480.3 km² → 182753 cells → ~180 000 cells
-    # median basins level 6 → ~4433.6 km² → 547283 cells → ~540 000 cells
+# %% Mosaicing
 
-    thresholds = [15000, 540000]
-    for threshold in thresholds:
-        name = f'streams_{threshold}'
-        print(f"{progress} Computing {name} for tile {tile_key}...")
-        func = wbt.extract_streams
-        kwargs = {'flow_accum': str(tile_paths['d8_flow_acc']),
-                  'threshold': threshold}
-        tile_paths[name] = process_feature(name, func, **kwargs)
+MOSAIC_OUTDIR = datadir / 'training'
 
-
-# %% Mosaic tiles back together
-
-
-names = ['slope', 'curvature', 'd8_pointer', 'd8_flow_acc', 'wetness_index',
-         'dist_to_stream', 'height_above_stream', 'dinf_flow_acc',
-         'streams_15000', 'streams_540000']
-for i, name in enumerate(names):
+for i, name in enumerate(FEATURES[:1]):
     print(f"[{i+1:02d}] Mosaicing {name} tiles...")
-    mosaic_path = MOSAIC_OUTDIR / f'{name}.tif'
+    mosaic_path = MOSAIC_OUTDIR / f'{name}.vrt'
     if mosaic_path.exists() and OVERWRITE is False:
         continue
 
@@ -245,18 +179,155 @@ for i, name in enumerate(names):
         cleanup_tiles=False
         )
 
-    create_pyramid_overview(mosaic_path, overwrite=True)
+# %%
+import itertools
+import rasterio
+from scipy import stats
+import numpy as np
+from rasterio.transform import rowcol
+import pandas as pd
+from whitebox import WhiteboxTools
+from skimage.morphology import skeletonize, remove_small_objects
+from scipy.ndimage import label
+from skimage.measure import regionprops
+import os
+import pandas as pd
+
+from time import perf_counter
+
+training_df = {}
+
+print('Processing smoothed dem...')
+t0 = perf_counter()
+with rasterio.open(tile_paths['smoothed_dem']) as src:
+    new_transform = src.transform
+    new_width = src.width
+    new_height = src.height
+
+    smoothed_dem = src.read(1)
+
+    cols, rows = np.meshgrid(np.arange(new_width), np.arange(new_height))
+    xs, ys = rasterio.transform.xy(new_transform, rows, cols, offset="center")
+
+    xs = np.array(xs).reshape(smoothed_dem.shape)
+    ys = np.array(ys).reshape(smoothed_dem.shape)
+
+t1 = perf_counter()
+print(t1 - t0)
+
+with rasterio.open(tile_paths['ridges']) as src:
+    ridges = src.read(1)
+
+with rasterio.open(tile_paths['streams']) as src:
+    streams = src.read(1)
 
 
 # %%
 
-# TWI combines two important controls on local saturation: upstream
-# contributing area (As) and local slope (β): TI = ln(As / tan β).
-# That single index therefore captures both accumulation potential (As) and
-# drainage ability (slope).
+size = 100
+n, p = smoothed_dem.shape
 
-# TWI (implicitly) captures :
-# - accumulation tendency (via As),  which correlates
-#   with being “downhill / near drainage”
-# - Local drainage potential (via slope)
-# - Broad-scale wetness-prone locations (valleys, concavities).
+error_points = set()
+
+features = []
+error_points = []
+
+loop_timeit = []
+training_df = {}
+print('Processing features...')
+for i, (row_point, col_point) in enumerate(itertools.product(range(n), range(p))):
+
+    t0 = perf_counter()
+    row_mi = max(0, row_point - size)
+    row_ma = min(n, row_point + size)
+
+    col_mi = max(0, col_point - size)
+    col_ma = min(p, col_point + size)
+
+    # Calculate dist to top (ridge).
+
+    ones_indices = np.argwhere(ridges[row_mi:row_ma, col_mi:col_ma] == 1)
+    sqrt_dist = ((ones_indices[:, 0] - row_point + row_mi) ** 2 +
+                 (ones_indices[:, 1] - col_point + col_mi) ** 2)
+    sorted_indices = np.argsort(sqrt_dist)
+
+    ridge_point_row = None
+    ridge_point_col = None
+
+    for idx in sorted_indices:
+        nearest_point = ones_indices[idx]
+        candidate_row = nearest_point[0] + row_mi
+        candidate_col = nearest_point[1] + col_mi
+
+        if streams[row_point, col_point] == 1:
+            ridge_point_row = candidate_row
+            ridge_point_col = candidate_col
+            break
+
+        ridge_points = np.array(new_bresenham_line(
+            row0=row_point, col0=col_point,
+            row1=candidate_row, col1=candidate_col
+            ))
+
+        # Check if the line crosses a stream point.
+        if not any(streams[row, col] == 1 for row, col in ridge_points[1:]):
+            ridge_point_row = candidate_row
+            ridge_point_col = candidate_col
+            break
+
+    if ridge_point_row is None or ridge_point_col is None:
+        error_points.append((row_point, col_point))
+        ridge_point_row = 0
+        ridge_point_col = 0
+
+    # Calculate dist to stream.
+
+    ones_indices = np.argwhere(streams[row_mi:row_ma, col_mi:col_ma] == 1)
+    if len(ones_indices) == 0:
+        print('NO STREAM FOUND.')
+        continue
+    print(i, 'STREAM FOUND.')
+
+    sqrt_dist = (
+        (ones_indices[:, 0] - row_point + row_mi) ** 2 +
+        (ones_indices[:, 1] - col_point + col_mi) ** 2)
+    nearest_index = np.argmin(sqrt_dist)
+    nearest_point = ones_indices[nearest_index]
+
+    stream_point_row = nearest_point[0] + row_mi
+    stream_point_col = nearest_point[1] + col_mi
+
+    ridge_points = np.array(bresenham_line(
+        row0=row_point,
+        col0=col_point,
+        row1=candidate_row,
+        col1=candidate_col,
+        ))
+
+    stream_points = np.array(bresenham_line(
+        row0=row_point,
+        col0=col_point,
+        row1=stream_point_row,
+        col1=stream_point_col,
+        ))
+
+    training_df["ridge_row"] = ridge_point_row
+    training_df["ridge_col"] = ridge_point_col
+
+    training_df["stream_row"] = stream_point_row
+    training_df["stream_col"] = stream_point_col
+
+    dem_point = smoothed_dem[row_point, col_point]
+    dem_stream = smoothed_dem[stream_point_row, stream_point_col]
+    dem_ridge = smoothed_dem[ridge_point_row, ridge_point_col]
+
+    training_df["alt_stream"] = dem_point - dem_stream
+    training_df["alt_top"] = dem_ridge - dem_point
+
+    loop_timeit.append(perf_counter() - t0)
+
+    if i == 100:
+        break
+
+t2 = perf_counter()
+print(t2 - t1)
