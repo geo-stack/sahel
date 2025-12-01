@@ -545,6 +545,69 @@ def height_above_nearest_stream(dem: Path, dist_stream: Path, output: Path):
         dst.write(hans, 1)
 
 
+def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
+    """
+    Calculate the height difference below the nearest ridge for each pixel in
+    a DEM and save the results.
+
+    For each valid pixel in a digital elevation model (DEM), computes the
+    height below the nearest ridge . The height below ridges is calculated
+    as the elevation difference between the DEM pixel and the elevation of
+    the nearest ridge. The result is saved as a raster file.
+
+    Parameters
+    ----------
+    dem : Path
+        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
+        raster dataset.
+    dist_ridge : Path
+        Path to the raster file containing distances to the nearest ridge,
+        along with the ridge pixel coordinates.
+    output : Path
+        Path where the output raster file containing the height differences
+        will be saved.
+
+    Output
+    ------
+    - A raster file saved to the `output` path containing the computed height
+      differences below the nearest ridge as a float32 raster.
+
+    Notes
+    -----
+    - The DEM and `dist_ridge` rasters must have identical spatial resolution,
+      extent, and coordinate reference system (CRS).
+    - The `dist_ridge` raster must contain two additional bands with the row
+      and column indices of the nearest ridge pixels.
+    - Pixels with NoData values in the DEM are excluded from the computation.
+    """
+    with rasterio.open(dem) as src:
+        dem_profile = src.profile
+        dem_data = src.read(1)
+        dem_nodata = src.nodata
+        nodata_mask = (dem_data == dem_nodata)
+        dem_width = src.width
+        dem_height = src.height
+
+        dem_transform = src.transform
+
+    with rasterio.open(dist_ridge) as src:
+        assert dem_transform == src.transform
+        ridge_rows = src.read(2).astype(int)[~nodata_mask]
+        ridge_cols = src.read(3).astype(int)[~nodata_mask]
+
+    hbnr = np.full(
+        (dem_height, dem_width), dem_nodata, dtype=np.float32
+        )
+    hbnr[~nodata_mask] = (
+        dem_data[ridge_rows, ridge_cols] - dem_data[~nodata_mask]
+        )
+
+    out_profile = dem_profile.copy()
+    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        dst.write(hbnr, 1)
+
+
 def neighborhood_stats():
     pass
 
