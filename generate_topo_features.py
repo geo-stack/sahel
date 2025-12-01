@@ -23,7 +23,8 @@ from sahel import __datadir__ as datadir
 from sahel.gishelpers import get_dem_filepaths
 from sahel.tiling import (
     generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles)
-from sahel.topo import dist_to_streams, extract_ridges
+from sahel.topo import (
+    dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist)
 
 
 OVERWRITE = False
@@ -32,7 +33,8 @@ TILES_CROPPED_DIR = datadir / 'training' / 'tiles (cropped)'
 
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
-            'slope', 'curvature', 'dist_stream', 'ridges']
+            'slope', 'curvature', 'dist_stream', 'ridges',
+            'dist_top', 'ratio_dist']
 
 
 # %% Tiling
@@ -148,6 +150,18 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
                        'max_flow_acc': 2}
 
             },
+        'dist_top': {
+            'func': dist_to_ridges,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'streams': tile_paths['streams'],
+                       'ridges': tile_paths['ridges']}
+            },
+        'ratio_dist': {
+            'func': ratio_dist,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'dist_stream': tile_paths['dist_stream'],
+                       'dist_ridge': tile_paths['dist_top']}
+            },
         }
 
     for name in FEATURES:
@@ -159,7 +173,7 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
         t1 = perf_counter()
         print(f' done in {round(t1 - t0):0.0f} sec')
 
-    if tile_count == 3:
+    if tile_count == 1:
         break
 
 # %% Mosaicing
@@ -220,114 +234,3 @@ with rasterio.open(tile_paths['ridges']) as src:
 
 with rasterio.open(tile_paths['streams']) as src:
     streams = src.read(1)
-
-
-# %%
-
-size = 100
-n, p = smoothed_dem.shape
-
-error_points = set()
-
-features = []
-error_points = []
-
-loop_timeit = []
-training_df = {}
-print('Processing features...')
-for i, (row_point, col_point) in enumerate(itertools.product(range(n), range(p))):
-
-    t0 = perf_counter()
-    row_mi = max(0, row_point - size)
-    row_ma = min(n, row_point + size)
-
-    col_mi = max(0, col_point - size)
-    col_ma = min(p, col_point + size)
-
-    # Calculate dist to top (ridge).
-
-    ones_indices = np.argwhere(ridges[row_mi:row_ma, col_mi:col_ma] == 1)
-    sqrt_dist = ((ones_indices[:, 0] - row_point + row_mi) ** 2 +
-                 (ones_indices[:, 1] - col_point + col_mi) ** 2)
-    sorted_indices = np.argsort(sqrt_dist)
-
-    ridge_point_row = None
-    ridge_point_col = None
-
-    for idx in sorted_indices:
-        nearest_point = ones_indices[idx]
-        candidate_row = nearest_point[0] + row_mi
-        candidate_col = nearest_point[1] + col_mi
-
-        if streams[row_point, col_point] == 1:
-            ridge_point_row = candidate_row
-            ridge_point_col = candidate_col
-            break
-
-        ridge_points = np.array(new_bresenham_line(
-            row0=row_point, col0=col_point,
-            row1=candidate_row, col1=candidate_col
-            ))
-
-        # Check if the line crosses a stream point.
-        if not any(streams[row, col] == 1 for row, col in ridge_points[1:]):
-            ridge_point_row = candidate_row
-            ridge_point_col = candidate_col
-            break
-
-    if ridge_point_row is None or ridge_point_col is None:
-        error_points.append((row_point, col_point))
-        ridge_point_row = 0
-        ridge_point_col = 0
-
-    # Calculate dist to stream.
-
-    ones_indices = np.argwhere(streams[row_mi:row_ma, col_mi:col_ma] == 1)
-    if len(ones_indices) == 0:
-        print('NO STREAM FOUND.')
-        continue
-    print(i, 'STREAM FOUND.')
-
-    sqrt_dist = (
-        (ones_indices[:, 0] - row_point + row_mi) ** 2 +
-        (ones_indices[:, 1] - col_point + col_mi) ** 2)
-    nearest_index = np.argmin(sqrt_dist)
-    nearest_point = ones_indices[nearest_index]
-
-    stream_point_row = nearest_point[0] + row_mi
-    stream_point_col = nearest_point[1] + col_mi
-
-    ridge_points = np.array(bresenham_line(
-        row0=row_point,
-        col0=col_point,
-        row1=candidate_row,
-        col1=candidate_col,
-        ))
-
-    stream_points = np.array(bresenham_line(
-        row0=row_point,
-        col0=col_point,
-        row1=stream_point_row,
-        col1=stream_point_col,
-        ))
-
-    training_df["ridge_row"] = ridge_point_row
-    training_df["ridge_col"] = ridge_point_col
-
-    training_df["stream_row"] = stream_point_row
-    training_df["stream_col"] = stream_point_col
-
-    dem_point = smoothed_dem[row_point, col_point]
-    dem_stream = smoothed_dem[stream_point_row, stream_point_col]
-    dem_ridge = smoothed_dem[ridge_point_row, ridge_point_col]
-
-    training_df["alt_stream"] = dem_point - dem_stream
-    training_df["alt_top"] = dem_ridge - dem_point
-
-    loop_timeit.append(perf_counter() - t0)
-
-    if i == 100:
-        break
-
-t2 = perf_counter()
-print(t2 - t1)
