@@ -182,7 +182,7 @@ def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path):
 
     assert dem_transform == ridges_transform == streams_transform
 
-    results = dist_to_ridges_numba(
+    results = _dist_to_ridges_numba(
         dem_data, streams_data, ridges_data,
         nodata=dem_nodata, pixel_size=pixel_size
         )
@@ -210,7 +210,7 @@ def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path):
 
 
 @njit
-def dist_to_ridges_numba(
+def _dist_to_ridges_numba(
         dem_data: np.ndarray,
         streams_data: np.ndarray,
         ridges_data: np.ndarray,
@@ -317,7 +317,7 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
         dem_profile = src.profile.copy()
         dem_data = src.read(1)
         dem_nodata = src.nodata
-        nodata_mask = dem_data == dem_nodata
+        nodata_mask = (dem_data == dem_nodata)
 
     with rasterio.open(streams) as src:
         streams_data = src.read(1)
@@ -410,3 +410,105 @@ def height_above_stream(output: Path, dem: Path, streams: Path):
     meta.update(dtype='float32')
     with rasterio.open(output, 'w', **meta) as dst:
         dst.write(elevation_above_stream.astype('float32'), 1)
+
+
+def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
+    """
+    Calculate the ratio of distances between streams and ridges for
+    each pixel in a DEM and save the result.
+
+    For all valid pixels in a digital elevation model (DEM), computes the
+    ratio between the distance to the nearest stream (`dist_stream`) and
+    the distance to the topologically nearest ridge (`dist_ridge`).
+
+    Parameters
+    ----------
+    dem : Path
+        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
+        raster dataset.
+    dist_stream : Path
+        Path to the raster file containing distances to the nearest stream for
+        each pixel.
+    dist_ridge : Path
+        Path to the raster file containing distances to the topologically
+        nearest ridge for each pixel.
+    output : Path
+        Path where the output raster file containing the computed ratio of
+        distances will be saved.
+
+    Output
+    ------
+    - A raster file saved to the `output` path containing the computed ratio of
+      distances (`dist_stream` / `dist_ridge`) as a float32 raster.
+
+    Notes
+    -----
+    - The DEM, `dist_stream`, and `dist_ridge` rasters must have the same
+      spatial resolution, extent, and coordinate reference system (CRS).
+    - Distance values in the `dist_ridge` raster are increased by the size of
+      the DEM's pixels to avoid division by zero during ratio calculations.
+    - Pixels with NoData values in the DEM are excluded from the computation.
+    """
+    with rasterio.open(dem) as src:
+        dem_profile = src.profile
+        dem_data = src.read(1)
+        dem_nodata = src.nodata
+        nodata_mask = (dem_data == dem_nodata)
+        dem_width = src.width
+        dem_height = src.height
+
+        dem_transform = src.transform
+        assert abs(dem_transform.e) == abs(dem_transform.a)
+        pixel_size = abs(dem_transform.e)
+
+    with rasterio.open(dist_stream) as src:
+        assert dem_transform == src.transform
+        dist_stream_data = src.read(1)
+
+    with rasterio.open(dist_ridge) as src:
+        assert dem_transform == src.transform
+        dist_ridge_data = src.read(1) + pixel_size
+
+    ratio_dist = np.full((dem_height, dem_width), dem_nodata)
+    ratio_dist[~nodata_mask] = (
+        dist_stream_data[~nodata_mask] / dist_ridge_data[~nodata_mask]
+        )
+
+    out_profile = dem_profile.copy()
+    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        dst.write(ratio_dist, 1)
+
+
+def neighborhood_stats():
+    pass
+
+
+def _neighborhood_stats_numba():
+    pass
+
+
+def path_to_stream_stats():
+    pass
+
+
+def path_to_stream_stats_numba():
+    pass
+
+
+if __name__ == '__main__':
+    from sahel import __datadir__ as datadir
+    tile_dir = datadir / "training" / "tiles (overlapped)"
+
+    output = tile_dir / "dist_ridge" / "dist_ridge_tile_017_012.tif"
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    from time import perf_counter
+    t0 = perf_counter()
+    dist_to_ridges(
+        dem=tile_dir / "dem" / "dem_tile_017_012.tif",
+        ridges=tile_dir / "ridges" / "ridges_tile_017_012.tif",
+        streams=tile_dir / "streams" / "streams_tile_017_012.tif",
+        output=output
+        )
+    t1 = perf_counter()
