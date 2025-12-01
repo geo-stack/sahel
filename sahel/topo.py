@@ -372,46 +372,6 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
         dst.set_band_description(3, 'nearest_stream_col')
 
 
-def height_above_stream(output: Path, dem: Path, streams: Path):
-    # Read DEM data and metadata.
-    with rasterio.open(dem) as src:
-        dem_data = src.read(1).astype('float32')
-        meta = src.meta.copy()
-        nodata = src.nodata
-
-    # Replace nodata by nan.
-    dem_data[dem_data == nodata] = np.nan
-
-    # Read streams (0 = no stream, >0 = stream).
-    with rasterio.open(streams) as src:
-        streams_data = src.read(1)
-
-    # Create binary stream mask (1 = stream, 0 = non-stream).
-    stream_mask = streams_data > 0
-
-    # Get elevation of nearest stream for each pixel
-    indices = distance_transform_edt(
-        ~stream_mask,
-        return_distances=False,
-        return_indices=True)
-
-    rows = indices[0]
-    cols = indices[1]
-
-    nearest_stream_elevation = dem_data[rows, cols]
-
-    # Calculate elevation above nearest stream
-    elevation_above_stream = dem_data - nearest_stream_elevation
-
-    # Fill nan value with nodata.
-    elevation_above_stream[np.isnan(elevation_above_stream)] = nodata
-
-    # Save elevation above stream
-    meta.update(dtype='float32')
-    with rasterio.open(output, 'w', **meta) as dst:
-        dst.write(elevation_above_stream.astype('float32'), 1)
-
-
 def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
     """
     Calculate the ratio of distances between streams and ridges for
@@ -438,15 +398,16 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
 
     Output
     ------
-    - A raster file saved to the `output` path containing the computed ratio of
-      distances (`dist_stream` / `dist_ridge`) as a float32 raster.
+    - A raster file saved to the `output` path containing the computed ratio
+      of distances (`dist_stream` / `dist_ridge`) as a float32 raster.
 
     Notes
     -----
     - The DEM, `dist_stream`, and `dist_ridge` rasters must have the same
       spatial resolution, extent, and coordinate reference system (CRS).
-    - Distance values in the `dist_ridge` raster are increased by the size of
-      the DEM's pixels to avoid division by zero during ratio calculations.
+    - Distance values in the `dist_ridge` raster are adjusted to the pixel
+      size of the DEM's pixels to avoid division by zero during ratio
+      calculations.
     - Pixels with NoData values in the DEM are excluded from the computation.
     """
     with rasterio.open(dem) as src:
@@ -467,7 +428,7 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
 
     with rasterio.open(dist_ridge) as src:
         assert dem_transform == src.transform
-        dist_ridge_data = src.read(1) + pixel_size
+        dist_ridge_data = np.maximum(src.read(1), pixel_size)
 
     ratio_dist = np.full(
         (dem_height, dem_width), dem_nodata, dtype=np.float32
@@ -482,9 +443,9 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
         dst.write(ratio_dist, 1)
 
 
-def height_above_nearest_stream(dem: Path, dist_stream: Path, output: Path):
+def height_above_nearest_drainage(dem: Path, dist_stream: Path, output: Path):
     """
-    Calculate the height difference above the nearest stream for each
+    Calculate the height above the nearest drainage (HAND) stream for each
     pixel in a DEM and save the results.
 
     For each valid pixel in a digital elevation model (DEM), computes the
@@ -547,7 +508,7 @@ def height_above_nearest_stream(dem: Path, dist_stream: Path, output: Path):
 
 def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
     """
-    Calculate the height difference below the nearest ridge for each pixel in
+    Calculate the height below the nearest ridge (HBNR) for each pixel in
     a DEM and save the results.
 
     For each valid pixel in a digital elevation model (DEM), computes the
@@ -606,6 +567,79 @@ def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
     out_profile.update(dtype=rasterio.float32, compress='deflate')
     with rasterio.open(output, 'w', **out_profile) as dst:
         dst.write(hbnr, 1)
+
+
+def ratio_stream(dem: Path, hand: Path, dist_stream: Path, output: Path):
+    """
+    Calculate the ratio of height above the nearest drainage/stream (HAND)
+    to the distance from the nearest stream for each pixel in a DEM and save
+    the results.
+
+    This function computes the ratio of height above the nearest stream (HAND)
+    to the distance to the nearest stream. The height above the nearest stream
+    is provided as an input raster (`hand`), and the distance to the nearest
+    stream is adjusted to avoid division by zero. The result is saved as an
+    output raster.
+
+    Parameters
+    ----------
+    dem : Path
+        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
+        raster dataset.
+    hand : Path
+        Path to the raster file containing the height above the nearest stream
+        for each pixel.
+    dist_stream : Path
+        Path to the raster file containing distances to the nearest stream for
+        each pixel.
+    output : Path
+        Path where the output raster file containing the computed ratio will
+        be saved.
+
+    Output
+    ------
+    - A raster file saved to the `output` path containing the computed ratio of
+      height above streams to the distance to streams as a float32 raster.
+
+     Notes
+     -----
+     - The DEM, `hand`, and `dist_stream` rasters must have identical spatial
+       resolution, extent, and coordinate reference system (CRS).
+     - Distance values in the `dist_stream` raster are adjusted to the pixel
+       size of the DEM to avoid division by zero during ratio calculations.
+     - Pixels with NoData values in the DEM are excluded from the computation.
+    """
+    with rasterio.open(dem) as src:
+        dem_profile = src.profile
+        dem_data = src.read(1)
+        dem_nodata = src.nodata
+        nodata_mask = (dem_data == dem_nodata)
+        dem_width = src.width
+        dem_height = src.height
+
+        dem_transform = src.transform
+        assert abs(dem_transform.e) == abs(dem_transform.a)
+        pixel_size = abs(dem_transform.e)
+
+    with rasterio.open(hand) as src:
+        assert dem_transform == src.transform
+        hand_data = src.read(1)
+
+    with rasterio.open(dist_stream) as src:
+        assert dem_transform == src.transform
+        dist_stream_data = np.maximum(src.read(1), pixel_size)
+
+    ratio_stream = np.full(
+        (dem_height, dem_width), dem_nodata, dtype=np.float32
+        )
+    ratio_stream[~nodata_mask] = (
+        hand_data[~nodata_mask] / dist_stream_data[~nodata_mask]
+        )
+
+    out_profile = dem_profile.copy()
+    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        dst.write(ratio_stream, 1)
 
 
 def neighborhood_stats():
