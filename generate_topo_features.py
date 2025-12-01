@@ -24,7 +24,8 @@ from sahel.gishelpers import get_dem_filepaths
 from sahel.tiling import (
     generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles)
 from sahel.topo import (
-    dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist)
+    dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist,
+    height_above_nearest_stream, height_below_nearest_ridge)
 
 
 OVERWRITE = False
@@ -34,7 +35,7 @@ TILES_CROPPED_DIR = datadir / 'training' / 'tiles (cropped)'
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
             'slope', 'curvature', 'dist_stream', 'ridges',
-            'dist_top', 'ratio_dist']
+            'dist_top', 'ratio_dist', 'alt_stream', 'alt_top']
 
 
 # %% Tiling
@@ -160,6 +161,16 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
             'func': ratio_dist,
             'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'dist_stream': tile_paths['dist_stream'],
+                       'dist_ridge': tile_paths['dist_top']}
+            },
+        'alt_stream': {
+            'func': height_above_nearest_stream,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'dist_stream': tile_paths['dist_stream']}
+            },
+        'alt_top': {
+            'func': height_below_nearest_ridge,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'dist_ridge': tile_paths['dist_top']}
             },
         }
