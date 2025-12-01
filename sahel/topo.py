@@ -415,7 +415,7 @@ def height_above_stream(output: Path, dem: Path, streams: Path):
 def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
     """
     Calculate the ratio of distances between streams and ridges for
-    each pixel in a DEM and save the result.
+    each pixel in a DEM and save the results.
 
     For all valid pixels in a digital elevation model (DEM), computes the
     ratio between the distance to the nearest stream (`dist_stream`) and
@@ -469,7 +469,9 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
         assert dem_transform == src.transform
         dist_ridge_data = src.read(1) + pixel_size
 
-    ratio_dist = np.full((dem_height, dem_width), dem_nodata)
+    ratio_dist = np.full(
+        (dem_height, dem_width), dem_nodata, dtype=np.float32
+        )
     ratio_dist[~nodata_mask] = (
         dist_stream_data[~nodata_mask] / dist_ridge_data[~nodata_mask]
         )
@@ -478,6 +480,69 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
     out_profile.update(dtype=rasterio.float32, compress='deflate')
     with rasterio.open(output, 'w', **out_profile) as dst:
         dst.write(ratio_dist, 1)
+
+
+def height_above_nearest_stream(dem: Path, dist_stream: Path, output: Path):
+    """
+    Calculate the height difference above the nearest stream for each
+    pixel in a DEM and save the results.
+
+    For each valid pixel in a digital elevation model (DEM), computes the
+    height above the nearest stream . The height above streams is
+    calculated as the elevation difference between the DEM pixel and the
+    elevation of the nearest stream. The result is saved as a raster file.
+
+    Parameters
+    ----------
+    dem : Path
+        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
+        raster dataset.
+    dist_stream : Path
+        Path to the raster file containing distances to the nearest stream,
+        along with the stream pixel coordinates.
+    output : Path
+        Path where the output raster file containing the height differences
+        will be saved.
+
+    Output
+    ------
+    - A raster file saved to the `output` path containing the computed height
+      differences above the nearest stream as a float32 raster.
+
+    Notes
+    -----
+    - The DEM and `dist_stream` rasters must have identical spatial resolution,
+      extent, and coordinate reference system (CRS).
+    - The `dist_stream` raster must contain two additional bands with the row
+      and column indices of the nearest stream pixels.
+    - Pixels with NoData values in the DEM are excluded from the computation.
+    """
+    with rasterio.open(dem) as src:
+        dem_profile = src.profile
+        dem_data = src.read(1)
+        dem_nodata = src.nodata
+        nodata_mask = (dem_data == dem_nodata)
+        dem_width = src.width
+        dem_height = src.height
+
+        dem_transform = src.transform
+
+    with rasterio.open(dist_stream) as src:
+        assert dem_transform == src.transform
+        stream_rows = src.read(2).astype(int)[~nodata_mask]
+        stream_cols = src.read(3).astype(int)[~nodata_mask]
+
+    hans = np.full(
+        (dem_height, dem_width), dem_nodata, dtype=np.float32
+        )
+    hans[~nodata_mask] = (
+        dem_data[~nodata_mask] - dem_data[stream_rows, stream_cols]
+        )
+
+    out_profile = dem_profile.copy()
+    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        dst.write(hans, 1)
 
 
 def neighborhood_stats():
