@@ -8,7 +8,7 @@
 # For inquiries, contact: info@geostack.ca
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
-from typing import Any
+from typing import Any, Callable
 
 # ---- Standard imports
 from pathlib import Path
@@ -22,6 +22,7 @@ from skimage.morphology import skeletonize, remove_small_objects
 
 # ---- Local imports
 from sahel.math import bresenham_line, precompute_spiral_offsets
+from sahel.localfilters import local_stats_numba, downslope_stats_numba
 
 
 def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
@@ -642,20 +643,128 @@ def ratio_stream(dem: Path, hand: Path, dist_stream: Path, output: Path):
         dst.write(ratio_stream, 1)
 
 
-def neighborhood_stats():
-    pass
+def local_stats(raster: Path, window: int, output: Path,
+                fisher: bool = False):
+    """
+    Calculate local neighborhood statistics for each pixel in a raster.
+
+    Computes min, max, mean, variance, skewness, and kurtosis within a
+    square moving window and saves results as a multi-band raster.
+
+    Parameters
+    ----------
+    raster : Path
+        Path to input raster file.
+    window : int
+        Size of the square window.  Will be adjusted to nearest odd number.
+    output : Path
+        Path where the output 6-band raster will be written, where
+        1=min, 2=max, 3=mean, 4=variance, 5=skewness, 6=kurtosis.
+    fisher : bool, optional
+        If True, compute Fisher's (excess) kurtosis. Default is False.
+    """
+
+    with rasterio.open(raster) as src:
+        profile = src.profile
+        data = np.asarray(src.read(1), dtype='float32')
+
+        nodata = src.nodata
+        nodata_mask = (data == nodata)
+
+        width = src.width
+        height = src.height
+
+    # Replace nodata by np.nan values.
+    data[nodata_mask] = np.nan
+
+    # Make sure window is an uneven number.
+    window = window + (1 - window % 2)
+
+    results = local_stats_numba(data, window=window)
+    assert results.shape[0] == 6
+    assert results.shape[1] == height
+    assert results.shape[2] == width
+
+    # Preserve the 'nodata' mask in the input raster.
+    results[:, nodata_mask] = nodata
+
+    # Replace any remaining 'nan' value by the 'nodata' value.
+    isnan = np.isnan(results)
+    if np.sum(isnan):
+        results[isnan] = nodata
+
+    out_profile = profile.copy()
+    out_profile.update(
+        dtype=rasterio.float32,
+        compress='deflate',
+        count=6
+        )
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        for i in range(6):
+            dst.write(results[i, :, :], i + 1)
+
+        # Add band descriptions
+        dst.set_band_description(1, 'min')
+        dst.set_band_description(2, 'max')
+        dst.set_band_description(3, 'mean')
+        dst.set_band_description(4, 'var')
+        dst.set_band_description(5, 'skew')
+        dst.set_band_description(6, 'kurt')
 
 
-def _neighborhood_stats_numba():
-    pass
+def stream_stats(
+        raster: Path,
+        dist_stream: Path,
+        output: Path,
+        fisher: bool = False
+        ):
+    with rasterio.open(raster) as src:
+        profile = src.profile
+        data = np.asarray(src.read(1), dtype='float32')
 
+        nodata = src.nodata
+        nodata_mask = (data == nodata)
 
-def path_to_stream_stats():
-    pass
+        width = src.width
+        height = src.height
 
+    with rasterio.open(dist_stream) as src:
+        stream_rows = src.read(2).astype(int)
+        stream_cols = src.read(3).astype(int)
 
-def path_to_stream_stats_numba():
-    pass
+    # Replace nodata by np.nan values.
+    data[nodata_mask] = np.nan
+
+    results = downslope_stats_numba(data, stream_rows, stream_cols)
+    assert results.shape[0] == 6
+    assert results.shape[1] == height
+    assert results.shape[2] == width
+
+    # Preserve the 'nodata' mask in the input raster.
+    results[:, nodata_mask] = nodata
+
+    # Replace any remaining 'nan' value by the 'nodata' value.
+    isnan = np.isnan(results)
+    if np.sum(isnan):
+        results[isnan] = nodata
+
+    out_profile = profile.copy()
+    out_profile.update(
+        dtype=rasterio.float32,
+        compress='deflate',
+        count=6
+        )
+    with rasterio.open(output, 'w', **out_profile) as dst:
+        for i in range(6):
+            dst.write(results[i, :, :], i + 1)
+
+        # Add band descriptions
+        dst.set_band_description(1, 'min')
+        dst.set_band_description(2, 'max')
+        dst.set_band_description(3, 'mean')
+        dst.set_band_description(4, 'var')
+        dst.set_band_description(5, 'skew')
+        dst.set_band_description(6, 'kurt')
 
 
 if __name__ == '__main__':
