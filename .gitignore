@@ -1,3 +1,4 @@
+notebooks/*.py
 .configs/*
 data/chirps/*
 data/dem/*
@@ -5,6 +6,8 @@ data/results/*
 data/pixels/*
 data/noaa_ndvi/*
 data/*
+asiz/*
+references/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -10,7 +10,7 @@
 # =============================================================================
 
 """
-Module for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
+Script for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
 format for the Sahel region.
 
 To use this script, you must have a valid NASA Earthdata account. You will be
@@ -21,11 +21,9 @@ This script automates the process of acquiring, extracting, and converting
 high-resolution Digital Elevation Model (DEM) data from NASA's NASADEM
 dataset
 
-see https://github.com/geo-stack/sahel/pull/5
 
-
-Main Features
--------------
+Script Workflow
+---------------
 - Defines a latitude/longitude bounding box covering all countries of the
   Sahel region of interest.
 - Generates the list of NASADEM tile filenames needed to cover this region.
@@ -40,6 +38,25 @@ Main Features
   your local Sahel project.
 - Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
 
+
+Rationale for using NASADEM
+---------------------------
+The NASADEM dataset was selected for this project because it provides
+high-resolution, globally available digital elevation data derived from
+the Shuttle Radar Topography Mission (SRTM) and enhanced with additional
+sources and improved processing. NASADEM improves upon the original SRTM
+by offering more complete coverage, fewer voids, and enhanced vertical
+accuracy, which is especially valuable for hydrological, geomorphological,
+and groundwater modeling across large regions like the Sahel. Its native
+resolution of 1 arc-second (~30 meters) is well-suited for regional-scale
+environmental analyses, making it an ideal foundation for extracting
+topographic features, surface water masks, and other terrain variables
+critical to understanding and predicting groundwater resources and
+surface water dynamics in West Africa.
+
+see also https://github.com/geo-stack/sahel/pull/5
+
+
 References
 ----------
 - NASADEM project: https://www.earthdata.nasa.gov/about/competitive-programs/
@@ -51,6 +68,7 @@ References
 # ---- Standard imports.
 import os
 import os.path as osp
+from math import floor, ceil
 
 # ---- Third party imports.
 import earthaccess
@@ -58,37 +76,27 @@ from earthaccess.exceptions import LoginAttemptFailure
 import numpy as np
 import keyring
 from osgeo import gdal
+import geopandas as gpd
 
 # ---- Local imports.
-from sahel import __datadir__, CONF
-from sahel.gishelpers import convert_hgt_to_geotiff, get_dem_filepaths
+from sahel import __datadir__ as datadir
+from sahel import CONF
+from sahel.gishelpers import (
+    get_dem_filepaths, multi_convert_hgt_to_geotiff,
+    )
 
-# Define longitude and latitude ranges (covering West Africa)
-LON_MIN = -19
-LON_MAX = 25
-LAT_MIN = 5
-LAT_MAX = 29
-
-
-blocklisted_tiles = [
-    'NASADEM_HGT_n27w015.zip',
-    'NASADEM_HGT_n27w016.zip',
-    'NASADEM_HGT_n27w017.zip',
-    'NASADEM_HGT_n27w018.zip',
-    'NASADEM_HGT_n27w019.zip',
-    'NASADEM_HGT_n28w014.zip',
-    'NASADEM_HGT_n28w015.zip',
-    'NASADEM_HGT_n28w016.zip',
-    'NASADEM_HGT_n28w017.zip',
-    'NASADEM_HGT_n28w018.zip',
-    'NASADEM_HGT_n28w019.zip',
-    'NASADEM_HGT_n29w014.zip',
-    ]
+# Define longitude and latitude ranges (covering the African continent)
+africa_landmass = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
+africa_landmass = africa_landmass.to_crs("EPSG:4326")
+LON_MIN = floor(africa_landmass.bounds.minx[0]) - 1
+LON_MAX = ceil(africa_landmass.bounds.maxx[0]) + 1
+LAT_MIN = floor(africa_landmass.bounds.miny[0]) - 1
+LAT_MAX = ceil(africa_landmass.bounds.maxy[0]) + 1
 
 
 # Prepare output directory.
-dest_dir = osp.join(__datadir__, 'dem', 'Global', 'hgt')
-os.makedirs(dest_dir, exist_ok=True)
+dest_dir = datadir / 'dem' / 'raw' / '__src__'
+dest_dir.mkdir(exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
 zip_names = []
@@ -163,10 +171,6 @@ avail_zip_names = [
 missing_tiles = []
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
 for i, zip_name in enumerate(zip_names):
-    if zip_name in blocklisted_tiles:
-        print(f'Skipping tile {i + 1} of {len(zip_names)} '
-              f'because it is blocklisted...')
-        continue
     if zip_name not in avail_zip_names:
         print(f'Skipping tile {i + 1} of {len(zip_names)} '
               f'because it does not exist...')
@@ -175,7 +179,7 @@ for i, zip_name in enumerate(zip_names):
     print(f'Processing tile {i + 1} of {len(zip_names)}...')
 
     url = base_url + zip_name
-    zip_filepath = osp.join(dest_dir, zip_name)
+    zip_filepath = dest_dir / zip_name
 
     # Skip if tile already downloaded.
     if osp.exists(zip_filepath):
@@ -194,27 +198,54 @@ for i, zip_name in enumerate(zip_names):
 
 # Convert hgt files to GeoTiff.
 
-for zip_name in zip_names:
-    zip_filepath = osp.join(dest_dir, zip_name)
-    if not osp.exists(zip_filepath):
-        continue
+count = 0
+progress = 0
 
-    root, _ = osp.splitext(zip_filepath)
-    tif_path = osp.join(osp.dirname(dest_dir), osp.basename(root) + '.tif')
+zip_fpaths = []
+tif_fpaths = []
+for i, zip_name in enumerate(zip_names):
+    zip_fpath = dest_dir / zip_name
+    zip_fpaths.append(zip_fpath)
 
-    if not osp.exists(tif_path):
-        convert_hgt_to_geotiff(zip_filepath, tif_path)
+    root, _ = osp.splitext(osp.basename(zip_fpath))
+    tif_fpaths.append(
+        osp.join(osp.dirname(dest_dir), root + '.tif'))
+
+multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
 
 
 # %%
 
 # Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
-
-dem_filepaths = get_dem_filepaths(osp.dirname(dest_dir))
-
-vrt_filename = osp.join(__datadir__, 'dem', "Global.vrt")
-ds = gdal.BuildVRT(vrt_filename, dem_filepaths)
+vrt_path = datadir / 'dem' / 'nasadem.vrt'
+dem_paths = get_dem_filepaths(dest_dir.parent)
+ds = gdal.BuildVRT(vrt_path, dem_paths)
 ds.FlushCache()
 del ds
 
-print(f'Virtual dataset generated at {vrt_filename}.')
+# Reprojected VRT and apply African landmass mask.
+
+dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
+pixel_size = 30  # 1 arc-second is ~30 m at the equator
+
+vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
+warp_options = gdal.WarpOptions(
+    cutlineDSName=str(datadir / 'coastline' / 'africa_landmass.gpkg'),
+    cropToCutline=False,
+    dstSRS=dst_crs,
+    format='VRT',
+    resampleAlg='bilinear',
+    xRes=pixel_size,
+    yRes=pixel_size,
+    multithread=True,
+    )
+
+ds_reproj = gdal.Warp(
+    str(vrt_reprojected),
+    str(vrt_path),
+    options=warp_options
+    )
+ds_reproj.FlushCache()
+del ds_reproj
+
+print(f'Virtual dataset generated at {vrt_reprojected}.')

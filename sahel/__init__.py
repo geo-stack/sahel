@@ -9,10 +9,11 @@
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
+from pathlib import Path
 from appconfigs.user import UserConfig
 import os.path as osp
 
-__datadir__ = osp.join(osp.dirname(osp.dirname(__file__)), 'data')
+__datadir__ = Path(__file__).parent.parent / 'data'
 
 # =============================================================================
 # Config instance
