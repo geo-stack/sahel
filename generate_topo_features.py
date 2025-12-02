@@ -10,8 +10,6 @@
 # =============================================================================
 
 # ---- Standard imports.
-import math
-from pathlib import Path
 from time import perf_counter
 
 # ---- Third party imports.
@@ -25,7 +23,8 @@ from sahel.tiling import (
     generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles)
 from sahel.topo import (
     dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist,
-    height_above_nearest_stream, height_below_nearest_ridge)
+    height_above_nearest_drainage, height_below_nearest_ridge, ratio_stream,
+    local_stats, stream_stats)
 
 
 OVERWRITE = False
@@ -35,7 +34,9 @@ TILES_CROPPED_DIR = datadir / 'training' / 'tiles (cropped)'
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
             'slope', 'curvature', 'dist_stream', 'ridges',
-            'dist_top', 'ratio_dist', 'alt_stream', 'alt_top']
+            'dist_top', 'ratio_dist', 'alt_stream', 'alt_top',
+            'ratio_stream', 'long_hessian_stats', 'long_grad_stats',
+            'short_grad_stats', 'stream_grad_stats', 'stream_hessian_stats']
 
 
 # %% Tiling
@@ -164,7 +165,7 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
                        'dist_ridge': tile_paths['dist_top']}
             },
         'alt_stream': {
-            'func': height_above_nearest_stream,
+            'func': height_above_nearest_drainage,
             'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'dist_stream': tile_paths['dist_stream']}
             },
@@ -173,7 +174,43 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
             'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'dist_ridge': tile_paths['dist_top']}
             },
+        'ratio_stream': {
+            'func': ratio_stream,
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'hand': tile_paths['alt_stream'],
+                       'dist_stream': tile_paths['dist_stream']}
+            },
+        'long_hessian_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['curvature'],
+                       'window': 41}
+            },
+        'long_grad_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'window': 41}
+            },
+        'short_grad_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'window': 7}
+            },
+        'stream_grad_stats': {
+            'func': stream_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'dist_stream': tile_paths['dist_stream'],
+                       'fisher': False}
+            },
+        'stream_hessian_stats': {
+            'func': stream_stats,
+            'kwargs': {'raster': tile_paths['curvature'],
+                       'dist_stream': tile_paths['dist_stream'],
+                       'fisher': False}
+            },
         }
+
+    # max_short_distance = 7 pixels == 210 m -> halfwidth de 105 m
+    # max_long_distance = 41 = 1230 m -> halfwidth = 615 m
 
     for name in FEATURES:
         t0 = perf_counter()
@@ -203,45 +240,3 @@ for i, name in enumerate(FEATURES[:1]):
         overwrite=False,
         cleanup_tiles=False
         )
-
-# %%
-import itertools
-import rasterio
-from scipy import stats
-import numpy as np
-from rasterio.transform import rowcol
-import pandas as pd
-from whitebox import WhiteboxTools
-from skimage.morphology import skeletonize, remove_small_objects
-from scipy.ndimage import label
-from skimage.measure import regionprops
-import os
-import pandas as pd
-
-from time import perf_counter
-
-training_df = {}
-
-print('Processing smoothed dem...')
-t0 = perf_counter()
-with rasterio.open(tile_paths['smoothed_dem']) as src:
-    new_transform = src.transform
-    new_width = src.width
-    new_height = src.height
-
-    smoothed_dem = src.read(1)
-
-    cols, rows = np.meshgrid(np.arange(new_width), np.arange(new_height))
-    xs, ys = rasterio.transform.xy(new_transform, rows, cols, offset="center")
-
-    xs = np.array(xs).reshape(smoothed_dem.shape)
-    ys = np.array(ys).reshape(smoothed_dem.shape)
-
-t1 = perf_counter()
-print(t1 - t0)
-
-with rasterio.open(tile_paths['ridges']) as src:
-    ridges = src.read(1)
-
-with rasterio.open(tile_paths['streams']) as src:
-    streams = src.read(1)
