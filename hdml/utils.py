@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from shapely.geometry import Point
 
 # ---- Local imports
-from sahel import __datadir__ as datadir
+from hdml import __datadir__ as datadir
 
 COUNTRIES = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
 TARGET_CRS = "ESRI:102022"  # Africa Albers Equal Area Conic
@@ -61,14 +61,13 @@ def create_wtd_obs_dataset(output: Path | str = None):
 
     countries = set(bad_pts_df.COUNTRY.values)
     ids = set(bad_pts_df.ID.values)
-    mask = np.fromiter(
-        (not (row.country in countries and row.ID in ids) for
-         i, row in pts_gdf.iterrows()),
+    mask = np.array(
+        [not (row.country in countries and row.ID in ids) for
+         i, row in pts_gdf.iterrows()],
         dtype=bool,
-        count=len(pts_gdf)
         )
     pts_gdf = pts_gdf.loc[mask]
-    print(f'Removed {np.sum(~mask)} bad points (out of {len(bad_pts_df)}).')
+    print(f'Removed {np.sum(~mask)} bad points.')
 
     # Filter points that falls outside African coastal limits.
     africa_landmass = gpd.read_file(
@@ -76,13 +75,7 @@ def create_wtd_obs_dataset(output: Path | str = None):
     if africa_landmass.crs != TARGET_CRS:
         africa_landmass = africa_landmass.to_crs(TARGET_CRS)
 
-    filt_pts_gdf = gpd.sjoin(
-        pts_gdf,
-        africa_landmass,
-        how='inner',  # Keep only points that intersect
-        predicate='within'  # Points must be within boundary
-        )
-    filt_pts_gdf = filt_pts_gdf.drop(columns=['index_right'])
+    filt_pts_gdf = gpd.clip(pts_gdf, africa_landmass)
 
     removed_count = len(pts_gdf) - len(filt_pts_gdf)
     print(f"Removed {removed_count} points that were outside "
@@ -217,7 +210,6 @@ def plot_wl_hist(df: pd.DataFrame, country: str):
 
 
 def generate_wl_hist_figures():
-    from sahel import __datadir__ as datadir
     countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
     for country in countries:
         filename = osp.join(datadir, 'data', f'{country}.xlsx')
@@ -227,8 +219,6 @@ def generate_wl_hist_figures():
         filepath = datadir / 'data' / f'wl_obs_count_{country}.png'
         if not filepath.exists():
             fig.savefig(filepath, dpi=220)
-
-    # %%
 
     countries = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
     dfs = []
