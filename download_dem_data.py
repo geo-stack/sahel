@@ -82,7 +82,7 @@ from hdml.gishelpers import (
 from hdml.ed_helpers import earthaccess_login
 
 
-# Set Earthdata credentials and login securely.
+print("Authenticating with NASA Earthdata...")
 earthaccess = earthaccess_login()
 
 # Define longitude and latitude ranges (covering the African continent)
