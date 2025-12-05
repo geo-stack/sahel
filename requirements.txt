@@ -1,6 +1,6 @@
 conda installspyder-kernels==3.0
 conda install keyring earthaccess
-conda install numpy=2.* matplotlib=3.7.* seaborn distinctipy
+conda install numpy=2.* matplotlib=3.8.* seaborn distinctipy
 conda install numba pandas scipy
 conda install scikit-image opencv
 conda install rasterio gdal pysheds
