@@ -25,6 +25,23 @@ from shapely.geometry import Point
 # ---- Local imports
 from hdml import __datadir__ as datadir
 
+"""
+wtd_helpers.py
+
+Helper utilities to read, clean, transform and plot water-table-depth (WTD)
+observations. Includes functions to load per-country spreadsheets, normalize
+date fields, create GeoDataFrames, filter bad points, and generate summary
+plots (histograms, spatial diagnostics).
+
+Public functions
+----------------
+create_wtd_obs_dataset
+read_obs_wl
+plot_wl_hist
+generate_wl_hist_figures
+"""
+
+
 COUNTRIES = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
 TARGET_CRS = "ESRI:102022"  # Africa Albers Equal Area Conic
 
