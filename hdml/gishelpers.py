@@ -12,18 +12,19 @@
 """GIS data manipulation utilities."""
 
 # ---- Standard imports
-import itertools
 from pathlib import Path
-import math
 import os
 import os.path as osp
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---- Third party imports
+import shapely
+import numpy as np
 import geopandas as gpd
 import rasterio
 from rasterio.features import rasterize
+from rasterio.mask import mask
 from osgeo import gdal
 
 gdal.UseExceptions()
@@ -332,3 +333,64 @@ def rasterize_streams(
         dst.write(burned, 1)
 
     return output_raster
+
+
+def extract_zonal_means(
+        raster_path: Path,
+        geometries: list[shapely.Geometry],
+        ) -> np.ndarray:
+    """
+    Extract mean raster values for a list of geometries.
+
+    Computes the spatial mean of raster values (e.g., NDVI, precipitation)
+    within each provided geometry (e.g., watershed polygons, administrative
+    boundaries). Nodata values are excluded from the mean calculation.
+    Geometries that do not intersect the raster or contain only nodata will
+    return NaN.
+
+    This implementation keeps the raster file open for the entire loop,
+    which is highly efficient for VRT files and large numbers of geometries.
+
+    Parameters
+    ----------
+    raster_path : Path
+        Path to the raster file (GeoTIFF, VRT, etc.).
+    geometries : list of shapely.Geometry
+        List of geometries (polygons, multipolygons) for which to extract
+        raster values.  Must be in the same CRS as the raster.
+
+    Returns
+    -------
+    np.ndarray
+        Array of mean values, one per geometry.
+    """
+    n_geoms = len(geometries)
+    mean_values = np.empty(n_geoms, dtype=np.float32)
+
+    with rasterio.open(raster_path) as src:
+        nodata = src.nodata
+
+        for i, geom in enumerate(geometries):
+            try:
+                # Mask raster with the geometry.
+                data, transform = mask(
+                    src, [geom], crop=True, filled=True, nodata=nodata
+                )
+                array = data[0]  # Get first band
+
+                # Compute mean, excluding nodata
+                if nodata is not None:
+                    valid_pixels = array[array != nodata]
+                else:
+                    valid_pixels = array
+
+                if valid_pixels.size > 0:
+                    mean_values[i] = np.mean(valid_pixels)
+                else:
+                    mean_values[i] = np.nan
+
+            except ValueError:
+                # Geometry doesn't intersect raster.
+                mean_values[i] = np.nan
+
+    return mean_values
