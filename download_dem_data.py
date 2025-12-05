@@ -66,24 +66,24 @@ References
 """
 
 # ---- Standard imports.
-import os
 import os.path as osp
 from math import floor, ceil
 
 # ---- Third party imports.
-import earthaccess
-from earthaccess.exceptions import LoginAttemptFailure
 import numpy as np
-import keyring
 from osgeo import gdal
 import geopandas as gpd
 
 # ---- Local imports.
-from sahel import __datadir__ as datadir
-from sahel import CONF
-from sahel.gishelpers import (
+from hdml import __datadir__ as datadir
+from hdml.gishelpers import (
     get_dem_filepaths, multi_convert_hgt_to_geotiff,
     )
+from hdml.ed_helpers import earthaccess_login
+
+
+# Set Earthdata credentials and login securely.
+earthaccess = earthaccess_login()
 
 # Define longitude and latitude ranges (covering the African continent)
 africa_landmass = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
@@ -107,48 +107,6 @@ for lat in np.arange(LAT_MIN, LAT_MAX + 1):
             f"{'n' if lat >= 0 else 's'}{abs(lat):02d}"
             f"{'w' if lon < 0 else 'e'}{abs(lon):03d}"
             ".zip")
-
-
-# %%
-# Set Earthdata credentials and login securely.
-
-# Try to get credentials from config and keyring or prompt user
-# if missing.
-
-earthdata_username = CONF.get('main', 'earthdata_username', None)
-earthdata_password = keyring.get_password("earthdata", earthdata_username)
-
-if earthdata_username is None or earthdata_password is None:
-    earthdata_username = input("Earthdata username: ")
-    if not earthdata_username:
-        raise ValueError(
-            "No Earthdata username provided. Please rerun and enter "
-            "your credentials."
-            )
-
-    earthdata_password = input("Earthdata password: ")
-    if not earthdata_password:
-        raise ValueError(
-            "No Earthdata password provided. Please rerun and "
-            "enter your credentials."
-            )
-
-
-# Try logging in to Earthdata and store credentials for next time.
-
-os.environ["EARTHDATA_USERNAME"] = earthdata_username
-os.environ["EARTHDATA_PASSWORD"] = earthdata_password
-try:
-    earthaccess.login()
-except LoginAttemptFailure:
-    raise LoginAttemptFailure(
-        "Earthdata login failed. Please check your credentials and try again."
-        )
-else:
-    CONF.set('main', 'earthdata_username', earthdata_username)
-    keyring.set_password("earthdata", earthdata_username, earthdata_password)
-
-print('Authentication with NASA Earthdata was successful.')
 
 
 # %%
