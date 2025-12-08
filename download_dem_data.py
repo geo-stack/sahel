@@ -11,7 +11,7 @@
 
 """
 Script for downloading and converting NASADEM DEM .hgt tiles to GeoTIFF
-format for the Sahel region.
+format for the entire African continent.
 
 To use this script, you must have a valid NASA Earthdata account. You will be
 prompted to provide your Earthdata username and password for authentication.
@@ -20,23 +20,6 @@ You can create an account for free at: https://urs.earthdata.nasa.gov/
 This script automates the process of acquiring, extracting, and converting
 high-resolution Digital Elevation Model (DEM) data from NASA's NASADEM
 dataset
-
-
-Script Workflow
----------------
-- Defines a latitude/longitude bounding box covering all countries of the
-  Sahel region of interest.
-- Generates the list of NASADEM tile filenames needed to cover this region.
-- Downloads each DEM tile as a ZIP archive directly from the NASA Earthdata/
-  USGS MEASURES service, using secure authentication via the `earthaccess`
-  library.
-- Extracts the .hgt DEM file directly from the ZIP using GDAL's virtual file
-  system (no need for manual unzipping).
-- Converts each .hgt file to a compressed GeoTIFF (default: ZSTD compression)
-  using rasterio, for ease of use in GIS and scientific workflows.
-- Stores the resulting GeoTIFFs in the 'data/dem/Global/hgt' directory within
-  your local Sahel project.
-- Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
 
 
 Rationale for using NASADEM
@@ -54,7 +37,7 @@ topographic features, surface water masks, and other terrain variables
 critical to understanding and predicting groundwater resources and
 surface water dynamics in West Africa.
 
-see also https://github.com/geo-stack/sahel/pull/5
+see also https://github.com/geo-stack/hydrodepthml/pull/5
 
 
 References
@@ -66,7 +49,6 @@ References
 """
 
 # ---- Standard imports.
-import os.path as osp
 from math import floor, ceil
 
 # ---- Third party imports.
@@ -95,8 +77,14 @@ LAT_MAX = ceil(africa_landmass.bounds.maxy[0]) + 1
 
 
 # Prepare output directory.
-dest_dir = datadir / 'dem' / 'raw' / '__src__'
-dest_dir.mkdir(exist_ok=True)
+DEST_DIR = datadir / 'dem'
+DEST_DIR.mkdir(exist_ok=True)
+
+TIF_DIR = DEST_DIR / 'tif'
+TIF_DIR.mkdir(exist_ok=True)
+
+HGT_DIR = DEST_DIR / 'hgt'
+HGT_DIR.mkdir(exist_ok=True)
 
 # Generate NASADEM zip filenames for the specified tiling grid.
 zip_names = []
@@ -118,65 +106,71 @@ granules = earthaccess.search_data(
     version="001",
     temporal="2000-02-11",
     cloud_hosted=False
-)
-avail_zip_names = [
-    granule['meta']['native-id'] + '.zip' for granule in granules
-    ]
+    )
 
+avail_zip_names = {}
+for granule in granules:
+    zip_name = granule['meta']['native-id'] + '.zip'
+    url = granule['umm']['RelatedUrls'][0]['URL']
+    avail_zip_names[zip_name] = url
+
+
+# %%
 
 # Download the NASADEM tiles.
 
 missing_tiles = []
 base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
-for i, zip_name in enumerate(zip_names):
-    if zip_name not in avail_zip_names:
-        print(f'Skipping tile {i + 1} of {len(zip_names)} '
-              f'because it does not exist...')
-        continue
 
-    print(f'Processing tile {i + 1} of {len(zip_names)}...')
+zip_fpaths = []
+tif_fpaths = []
+
+ntot = len(zip_names)
+for i, zip_name in enumerate(zip_names):
+    progress = f"[{i+1:02d}/{ntot}]"
+    if zip_name not in avail_zip_names:
+        print(f'{progress} Skipping because tile is not valid...')
+        missing_tiles.append(zip_name)
+        continue
 
     url = base_url + zip_name
-    zip_filepath = dest_dir / zip_name
+    zip_filepath = HGT_DIR / zip_name
+    tif_filepath = (TIF_DIR / zip_name).with_suffix('.tif')
 
-    # Skip if tile already downloaded.
-    if osp.exists(zip_filepath):
+    # Skip if tile was already downloaded.
+    if tif_filepath.exists():
+        print(f'{progress} Skipping because tif file already exists...')
+        continue
+    if zip_filepath.exists() or tif_filepath.exists():
+        print(f'{progress} Skipping because hgt file already exists...')
+        zip_fpaths.append(zip_filepath)
+        tif_fpaths.append(tif_filepath)
         continue
 
-    # Download the ZIP file and convert to GeoTIFF.
-    try:
-        earthaccess.download(
-            url, osp.dirname(zip_filepath), show_progress=False)
-    except Exception:
-        print(f'Failed to download DEM data for tile {i + 1} ({zip_name}).')
-        missing_tiles.append(zip_name)
+    print(f'{progress} Downloading DEM tile...')
 
+    # Download the ZIP file.
+    earthaccess.download(url, str(HGT_DIR), show_progress=False)
+
+    zip_fpaths.append(zip_filepath)
+    tif_fpaths.append(tif_filepath)
 
 # %%
 
 # Convert hgt files to GeoTiff.
 
-count = 0
-progress = 0
+print()
+print('Converting HGT archives to geoTiff...')
 
-zip_fpaths = []
-tif_fpaths = []
-for i, zip_name in enumerate(zip_names):
-    zip_fpath = dest_dir / zip_name
-    zip_fpaths.append(zip_fpath)
-
-    root, _ = osp.splitext(osp.basename(zip_fpath))
-    tif_fpaths.append(
-        osp.join(osp.dirname(dest_dir), root + '.tif'))
-
-multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
+if len(zip_fpaths) > 0:
+    multi_convert_hgt_to_geotiff(zip_fpaths, tif_fpaths)
 
 
 # %%
 
 # Generate a GDAL virtual raster (VRT) mosaic of all DEM GeoTIFFs.
-vrt_path = datadir / 'dem' / 'nasadem.vrt'
-dem_paths = get_dem_filepaths(dest_dir.parent)
+vrt_path = DEST_DIR / 'nasadem.vrt'
+dem_paths = get_dem_filepaths(TIF_DIR)
 ds = gdal.BuildVRT(vrt_path, dem_paths)
 ds.FlushCache()
 del ds
@@ -186,7 +180,7 @@ del ds
 dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
 pixel_size = 30  # 1 arc-second is ~30 m at the equator
 
-vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
+vrt_reprojected = DEST_DIR / 'nasadem_102022.vrt'
 warp_options = gdal.WarpOptions(
     cutlineDSName=str(datadir / 'coastline' / 'africa_landmass.gpkg'),
     cropToCutline=False,
