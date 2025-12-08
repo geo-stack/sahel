@@ -62,16 +62,26 @@ granules = earthaccess.search_data(
     cloud_hosted=False,
     )
 
-avail_hdf_names = [
-    granule['meta']['native-id'] for granule in granules
-    ]
+
+avail_hdf_names = {}
+for granule in granules:
+    tile_id = granule['meta']['native-id']
+    for url_data in granule['umm']['RelatedUrls']:
+        url = url_data['URL']
+        if url.endswith('hdf'):
+            break
+    else:
+        raise ValueError("Cannot find a URL ending with '.hdf'.")
+
+    avail_hdf_names[tile_id] = url
+
 
 # Only keep the hdf for the tiles listed in MODIS_TILE_NAMES.
-hdf_names = []
-for avail_hdf_name in avail_hdf_names:
+hdf_names = {}
+for avail_hdf_name in avail_hdf_names.keys():
     for tile_name in MODIS_TILE_NAMES:
         if tile_name in avail_hdf_name:
-            hdf_names.append(avail_hdf_name)
+            hdf_names[avail_hdf_name] = avail_hdf_names[avail_hdf_name]
             break
 
 # %%
@@ -85,12 +95,9 @@ if not index_fpath.exists():
 else:
     index_df = pd.read_csv(index_fpath, index_col=[0, 1])
 
-
-base_url = ('https://data.lpdaac.earthdatacloud.nasa.gov/'
-            'lp-prod-protected/MOD13Q1.061')
 i = 0
 n = len(hdf_names)
-for hdf_name in hdf_names:
+for hdf_name, url in hdf_names.items():
     progress = f"[{i+1:02d}/{n}]"
 
     hdf_fpath = NDVI_DIR / (hdf_name + '.hdf')
@@ -106,7 +113,6 @@ for hdf_name in hdf_names:
 
     # Download the MODIS HDF file and convert to GeoTIFF.
     if not hdf_fpath.exists():
-        url = base_url + '/' + hdf_name + '/' + hdf_name + '.hdf'
         try:
             earthaccess.download(url, NDVI_DIR, show_progress=False)
         except Exception:
