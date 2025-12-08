@@ -109,9 +109,8 @@ print(f"Removed {removed_count} points (from {original_count}) for which "
 gwl_gdf.to_file(datadir / "data" / "wtd_obs_all.gpkg", driver="GPKG")
 
 # Save the basins geometry.
-mask = basins_gdf['HYBAS_ID']
 basins_gdf = basins_gdf.set_index('HYBAS_ID', drop=True)
-basins_gdf = basins_gdf.loc[gwl_gdf['HYBAS_ID']]
+basins_gdf = basins_gdf.loc[gwl_gdf['HYBAS_ID'].unique()]
 basins_gdf = basins_gdf['geometry']
 
 basins_gdf.to_file(datadir / "data" / "wtd_basin_geometry.gpkg", driver="GPKG")
