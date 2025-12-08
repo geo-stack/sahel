@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# Copyright (C) Les solutions géostack, Inc
+#
+# This file was produced as part of a research project conducted for
+# The World Bank Group and is licensed under the terms of the MIT license.
+#
+# For inquiries, contact: info@geostack.ca
+# Repository: https://github.com/geo-stack/sahel_water_table_ml
+# =============================================================================
+
+"""Zonal data and stats extraction capability."""
+
+# ---- Standard imports
+from pathlib import Path
+
+# ---- Third party imports
+import shapely
+import numpy as np
+import geopandas as gpd
+import rasterio
+from rasterio.features import rasterize
+from rasterio.mask import mask
+from osgeo import gdal
+
+gdal.UseExceptions()
+
+
+def build_zonal_index_map(
+        raster_path: Path,
+        basin_gdf: gpd.GeoDataFrame,
+        all_touched: bool = False
+        ) -> tuple[dict, list]:
+    """
+    Build an index map for basin geometries relative to a raster grid.
+
+    For each basin, this computes the absolute pixel indices (rows, cols) that
+    fall inside the basin geometry. The returned dictionary contains raster
+    metadata necessary to validate that other rasters are on the same grid.
+
+
+
+    Parameters
+    ----------
+    raster_path : Path
+        Path to a representative raster (VRT/TIFF) that defines the grid.
+    basin_gdf : gpd.GeoDataFrame
+        GeoDataFrame containing basin geometries, indexed by basin ID.
+        Must be in the same CRS as the raster.
+    all_touched : bool
+        If True, only pixels whose centers fall within the basin geometry
+        are included, which is standard practice for hydrological zonal
+        statistics. This ensure accurate areal weighting and prevent
+        double-counting of pixels at basin boundaries. Very small
+        basins (<1-2 pixels) may return empty masks. Consider using
+        all_touched=True as a fallback for such cases if needed.
+
+    Returns
+    -------
+    zonal_index_map : dict
+        Dictionary with the following structure:
+        {
+            'width': int,
+                Raster width in pixels
+            'height': int,
+                Raster height in pixels
+            'crs': str,
+                Raster CRS as string (WKT or PROJ)
+            'indexes': dict[int, np.ndarray],
+                Mapping of basin_id -> Nx2 array of [row, col] indices.
+                Each array contains absolute row/col indices for pixels inside
+                the basin. Basins that don't intersect the raster are omitted.
+        }
+    bad_basin_ids : list[int]
+        List of basin IDs that did not intersect the raster or produced
+        empty masks.
+    """
+    import rasterio
+    from rasterio.features import geometry_window
+
+    indexes_for_geoms = {}
+    bad_basin_ids = []
+
+    with rasterio.open(raster_path) as src:
+        width, height = src.width, src.height
+        crs = src.crs
+
+        for index, row in basin_gdf.iterrows():
+
+            geom = row.geometry
+
+            try:
+                # Get the minimal window covering the geometry (speeds up
+                # rasterize)
+                win = geometry_window(src, [geom], pad_x=0, pad_y=0)
+            except Exception:
+                # Geometry does not intersect raster or other failure.
+                bad_basin_ids.append(index)
+                continue
+
+            win_height = int(win.height)
+            win_width = int(win.width)
+
+            if win_height <= 0 or win_width <= 0:
+                bad_basin_ids.append(index)
+                continue
+
+            # Rasterize the geometry into the window coordinates.
+            win_transform = src.window_transform(win)
+            mask = rasterize(
+                [(geom, 1)],
+                out_shape=(win_height, win_width),
+                transform=win_transform,
+                fill=0,
+                all_touched=all_touched,
+                dtype='uint8'
+                )
+
+            if not mask.any():
+                bad_basin_ids.append(index)
+                continue
+
+            rows, cols = np.nonzero(mask)  # rows/cols relative to window
+
+            # Convert to absolute row/col on the full raster
+            abs_rows = rows + int(win.row_off)
+            abs_cols = cols + int(win.col_off)
+
+            indexes_for_geoms[int(index)] = (
+                np.column_stack((abs_rows, abs_cols))
+                )
+
+    zonal_index_map = {
+        'width': width,
+        'height': height,
+        'crs': crs.to_string(),
+        'indexes': indexes_for_geoms
+        }
+
+    if len(bad_basin_ids):
+        print("Warning: {len(bad_basin_ids)} basins are empty.")
+
+    return zonal_index_map, bad_basin_ids
+
+
+def extract_zonal_means(
+        raster_path: Path,
+        geometries: list[shapely.Geometry],
+        ) -> np.ndarray:
+    """
+    Extract mean raster values for a list of geometries.
+
+    Computes the spatial mean of raster values (e.g., NDVI, precipitation)
+    within each provided geometry (e.g., watershed polygons, administrative
+    boundaries). Nodata values are excluded from the mean calculation.
+    Geometries that do not intersect the raster or contain only nodata will
+    return NaN.
+
+    This implementation keeps the raster file open for the entire loop,
+    which is highly efficient for VRT files and large numbers of geometries.
+
+    Parameters
+    ----------
+    raster_path : Path
+        Path to the raster file (GeoTIFF, VRT, etc.).
+    geometries : list of shapely.Geometry
+        List of geometries (polygons, multipolygons) for which to extract
+        raster values.  Must be in the same CRS as the raster.
+
+    Returns
+    -------
+    np.ndarray
+        Array of mean values, one per geometry.
+    """
+    n_geoms = len(geometries)
+    mean_values = np.empty(n_geoms, dtype=np.float32)
+
+    with rasterio.open(raster_path) as src:
+        nodata = src.nodata
+
+        for i, geom in enumerate(geometries):
+            try:
+                # Mask raster with the geometry.
+                data, transform = mask(
+                    src, [geom], crop=True, filled=True, nodata=nodata
+                )
+                array = data[0]  # Get first band
+
+                # Compute mean, excluding nodata
+                if nodata is not None:
+                    valid_pixels = array[array != nodata]
+                else:
+                    valid_pixels = array
+
+                if valid_pixels.size > 0:
+                    mean_values[i] = np.mean(valid_pixels)
+                else:
+                    mean_values[i] = np.nan
+
+            except ValueError:
+                # Geometry doesn't intersect raster.
+                mean_values[i] = np.nan
+
+    return mean_values
