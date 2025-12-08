@@ -138,7 +138,7 @@ def build_zonal_index_map(
         }
 
     if len(bad_basin_ids):
-        print("Warning: {len(bad_basin_ids)} basins are empty.")
+        print(f"Warning: {len(bad_basin_ids)} basins are empty.")
 
     return zonal_index_map, bad_basin_ids
 
