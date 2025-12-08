@@ -17,20 +17,29 @@ import shutil
 from osgeo import gdal
 import pandas as pd
 import geopandas as gpd
+import numpy as np
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
 from hdml.ed_helpers import earthaccess_login, MOD13Q1_hdf_to_geotiff
+from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
 MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h16v08', 'h17v08', 'h18v08']
 
-HDF_DIR = datadir / 'ndvi'
+NDVI_DIR = datadir / 'ndvi'
 
-TIF_DIR = HDF_DIR / 'tiles'
+TIF_DIR = NDVI_DIR / 'tiles'
 TIF_DIR.mkdir(parents=True, exist_ok=True)
 
-VRT_DIR = HDF_DIR / 'vrt'
+VRT_DIR = NDVI_DIR / 'vrt'
 VRT_DIR.mkdir(parents=True, exist_ok=True)
+
+tif_file_index_path = datadir / "ndvi" / "tiles_index.csv"
+vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
+
+basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
+basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
+basins_gdf.index = basins_gdf.index.astype(int)
 
 # %%
 
@@ -80,7 +89,7 @@ n = len(hdf_names)
 for hdf_name in hdf_names:
     progress = f"[{i+1:02d}/{n}]"
 
-    hdf_fpath = HDF_DIR / (hdf_name + '.hdf')
+    hdf_fpath = NDVI_DIR / (hdf_name + '.hdf')
     tif_fpath = TIF_DIR / (hdf_name + '.tif')
     bck_fpath = Path('E:/MODIS NDVI 250m/') / hdf_fpath.name
 
@@ -95,7 +104,7 @@ for hdf_name in hdf_names:
     if not hdf_fpath.exists():
         url = base_url + '/' + hdf_name + '/' + hdf_name + '.hdf'
         try:
-            earthaccess.download(url, HDF_DIR, show_progress=False)
+            earthaccess.download(url, NDVI_DIR, show_progress=False)
         except Exception:
             print(f'{progress} Failed to download NDVI data for {hdf_name}.')
             break
@@ -119,11 +128,6 @@ for hdf_name in hdf_names:
 
 # Generate GDAL virtual raster (VRT).
 
-basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
-basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
-basins_gdf.index = basins_gdf.index.astype(int)
-
-tif_file_index_path = datadir / "ndvi" / "tiles_index.csv"
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
 vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
@@ -158,9 +162,7 @@ for index, row in tif_file_index.iterrows():
     # Reprojected VRT.
     dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
 
-    vrt_reprojected = (
-        datadir / 'ndvi' / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.vrt"
-        )
+    vrt_reprojected = VRT_DIR / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.vrt"
 
     if not vrt_reprojected.exists():
         warp_options = gdal.WarpOptions(
@@ -185,11 +187,12 @@ for index, row in tif_file_index.iterrows():
 vrt_index.to_csv(vrt_index_path)
 
 # %%
-import numpy as np
-from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
-vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
-vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
+# Generate the basin zonal index map.
+
+vrt_index = pd.read_csv(
+    vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+    )
 
 wtd_gdf = gpd.read_file(datadir / "data" / "wtd_obs_all.gpkg")
 wtd_gdf = wtd_gdf.set_index("ID", drop=True)
@@ -204,24 +207,25 @@ vrt_fnames = np.unique(vrt_fnames)
 
 
 zonal_index_map, bad_basin_ids = build_zonal_index_map(
-    datadir / 'ndvi' / vrt_fnames[0], basins_gdf
+    VRT_DIR / vrt_fnames[0], basins_gdf
     )
-zonal_index_map['indexes'][basins_gdf.index[0]]
 
 # %%
 
-basin_geom = basins_gdf.geometry.iloc[0]
+# Extract NDVI means for each basin.
+
+tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
 ntot = len(tif_file_index)
 count = 0
 for vrt_name in vrt_fnames:
     print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
-    vrt_path = datadir / 'ndvi' / vrt_name
+    vrt_path = VRT_DIR / vrt_name
 
-    mean_ndvi = extract_zonal_means(vrt_path, basins_gdf.geometry)
+    mean_ndvi, basin_ids = extract_zonal_means(vrt_path, zonal_index_map)
     mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
 
-    mask_index = vrt_index.file == vrt_path.name
+    mask_index = vrt_index.file == vrt_name
     for i, basin_id in enumerate(basins_gdf.index):
         vrt_index.loc[mask_index, int(basin_id)] = mean_ndvi[i]
 
