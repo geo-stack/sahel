@@ -99,7 +99,8 @@ for lat in np.arange(LAT_MIN, LAT_MAX + 1):
 
 # %%
 
-# Get the list of available tile names from the NASADEM dataset.
+# Get the list of available tile names and their corresponding
+# url from the NASADEM dataset.
 
 granules = earthaccess.search_data(
     short_name="NASADEM_HGT",
@@ -111,7 +112,13 @@ granules = earthaccess.search_data(
 avail_zip_names = {}
 for granule in granules:
     zip_name = granule['meta']['native-id'] + '.zip'
-    url = granule['umm']['RelatedUrls'][0]['URL']
+    for url_data in granule['umm']['RelatedUrls']:
+        url = url_data['URL']
+        if url.endswith('.zip'):
+            break
+    else:
+        raise ValueError("Cannot find a URL ending with '.zip'.")
+
     avail_zip_names[zip_name] = url
 
 
