@@ -120,20 +120,19 @@ for granule in granules:
 # Download the NASADEM tiles.
 
 missing_tiles = []
-base_url = "https://e4ftl01.cr.usgs.gov/MEASURES/NASADEM_HGT.001/2000.02.11/"
-
 zip_fpaths = []
 tif_fpaths = []
 
 ntot = len(zip_names)
 for i, zip_name in enumerate(zip_names):
     progress = f"[{i+1:02d}/{ntot}]"
+
     if zip_name not in avail_zip_names:
         print(f'{progress} Skipping because tile is not valid...')
         missing_tiles.append(zip_name)
         continue
 
-    url = base_url + zip_name
+    url = avail_zip_names[zip_name]
     zip_filepath = HGT_DIR / zip_name
     tif_filepath = (TIF_DIR / zip_name).with_suffix('.tif')
 
@@ -141,6 +140,7 @@ for i, zip_name in enumerate(zip_names):
     if tif_filepath.exists():
         print(f'{progress} Skipping because tif file already exists...')
         continue
+
     if zip_filepath.exists() or tif_filepath.exists():
         print(f'{progress} Skipping because hgt file already exists...')
         zip_fpaths.append(zip_filepath)
