@@ -49,7 +49,7 @@ africa_gdf = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
 africa_shape = africa_gdf.union_all()
 africa_bbox = africa_shape.bounds  # (minx, miny, maxx, maxy)
 
-base_url = "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat/"
+base_url = "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat"
 
 
 # %%
@@ -95,7 +95,8 @@ for year in range(2000, 2026):
 
         # Skip if already downloaded.
         if tif_fpath.exists():
-            print(f"[{str(dtime)[:10]}] Skipping: tif file already exists.")
+            print(f"[{str(dtime)[:10]}] Skipping because "
+                  f"tif file already exists.")
             continue
 
         print(f"[{str(dtime)[:10]}] Downloading tif file...")
