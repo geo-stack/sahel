@@ -136,7 +136,7 @@ tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
 if not vrt_index_path.exists():
     vrt_index = pd.DataFrame(
-        columns=['file'] + list(basins_gdf.index),
+        columns=['file'] + list(basins_gdf.index.astype(str)),
         index=pd.date_range('2000-01-01', '2025-12-31')
         )
 else:
@@ -217,7 +217,9 @@ zonal_index_map, bad_basin_ids = build_zonal_index_map(
 # Extract NDVI means for each basin.
 
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
-vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
+vrt_index = pd.read_csv(
+    vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+    )
 
 ntot = len(tif_file_index)
 count = 0
@@ -230,12 +232,8 @@ for vrt_name in vrt_fnames:
 
     mask_index = vrt_index.file == vrt_name
     for i, basin_id in enumerate(basins_gdf.index):
-        vrt_index.loc[mask_index, int(basin_id)] = mean_ndvi[i]
+        vrt_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
 
     count += 1
 
 vrt_index.to_csv(vrt_index_path)
-
-# %%
-
-# Update the WTD dataset.
