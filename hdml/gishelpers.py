@@ -333,3 +333,47 @@ def rasterize_streams(
         dst.write(burned, 1)
 
     return output_raster
+
+
+def clip_and_project_raster(
+        input_raster: Path, output_raster: Path,
+        output_crs: str, clipping_bbox: tuple,
+        resample_alg: str = "bilinear"):
+    """
+    Clip and reproject a raster using GDAL.
+
+    Reprojects the input raster to a given CRS and clips it to the specified
+    bounding box. The output is written as a compressed GeoTIFF.
+
+    Parameters
+    ----------
+    input_raster : Path
+        Path to the input raster file (e.g., .tif or .vrt).
+    output_raster : Path
+        Path to save the output raster (GeoTIFF).
+    output_crs : str
+        Target coordinate reference system (CRS) in PROJ string or
+        EPSG code (e.g., 'ESRI:102022').
+    clipping_bbox : tuple
+        Bounding box for output in the form (min_x, min_y, max_x, max_y),
+        specified in the coordinates of the target CRS.
+    resample_alg : str, optional
+        Resampling method for reprojection. Options: 'nearest', 'bilinear',
+        'cubic', etc. Default is 'bilinear', suitable for continuous data
+        like precipitation.
+
+    Returns
+    -------
+    None
+        Writes the clipped, reprojected raster to output_raster.
+    """
+    warp_options = gdal.WarpOptions(
+        format='GTiff',
+        outputBounds=clipping_bbox,
+        outputBoundsSRS=output_crs,
+        dstSRS=output_crs,
+        resampleAlg=resample_alg,
+        creationOptions=['COMPRESS=LZW']
+        )
+
+    gdal.Warp(output_raster, input_raster, options=warp_options)
