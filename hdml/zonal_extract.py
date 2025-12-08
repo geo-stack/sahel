@@ -15,12 +15,10 @@
 from pathlib import Path
 
 # ---- Third party imports
-import shapely
 import numpy as np
 import geopandas as gpd
 import rasterio
 from rasterio.features import rasterize
-from rasterio.mask import mask
 from osgeo import gdal
 
 gdal.UseExceptions()
@@ -29,16 +27,24 @@ gdal.UseExceptions()
 def build_zonal_index_map(
         raster_path: Path,
         basin_gdf: gpd.GeoDataFrame,
-        all_touched: bool = False
         ) -> tuple[dict, list]:
     """
     Build an index map for basin geometries relative to a raster grid.
 
     For each basin, this computes the absolute pixel indices (rows, cols) that
-    fall inside the basin geometry. The returned dictionary contains raster
+    fall inside the basin geometry.  The returned dictionary contains raster
     metadata necessary to validate that other rasters are on the same grid.
 
+    By default, only pixels whose centers fall within the basin geometry
+    are included (all_touched=False), which is standard practice for
+    hydrological zonal statistics. This ensures accurate areal weighting
+    and prevents double-counting of pixels at basin boundaries.
 
+    For very small basins that do not contain any pixel centers, the function
+    falls back to all_touched=True, which includes any pixel intersected by
+    the basin polygon.  This avoids empty results at the cost of minor edge
+    over-sampling.  Basins using this fallback are flagged in the returned
+    metadata.
 
     Parameters
     ----------
@@ -47,13 +53,6 @@ def build_zonal_index_map(
     basin_gdf : gpd.GeoDataFrame
         GeoDataFrame containing basin geometries, indexed by basin ID.
         Must be in the same CRS as the raster.
-    all_touched : bool
-        If True, only pixels whose centers fall within the basin geometry
-        are included, which is standard practice for hydrological zonal
-        statistics. This ensure accurate areal weighting and prevent
-        double-counting of pixels at basin boundaries. Very small
-        basins (<1-2 pixels) may return empty masks. Consider using
-        all_touched=True as a fallback for such cases if needed.
 
     Returns
     -------
@@ -61,25 +60,37 @@ def build_zonal_index_map(
         Dictionary with the following structure:
         {
             'width': int,
-                Raster width in pixels
+                Raster width in pixels.
             'height': int,
-                Raster height in pixels
+                Raster height in pixels.
             'crs': str,
-                Raster CRS as string (WKT or PROJ)
-            'indexes': dict[int, np.ndarray],
+                Raster CRS as string (WKT or PROJ).
+            'indices': dict[int, np.ndarray],
                 Mapping of basin_id -> Nx2 array of [row, col] indices.
                 Each array contains absolute row/col indices for pixels inside
                 the basin. Basins that don't intersect the raster are omitted.
         }
-    bad_basin_ids : list[int]
-        List of basin IDs that did not intersect the raster or produced
-        empty masks.
+    basin_metadata : dict
+        Dictionary with keys:
+        {
+            'bad': list[int],
+                Basin IDs that did not intersect the raster or had invalid
+                geometry.
+            'small': list[int],
+                Basin IDs that required all_touched=True fallback due to
+                small size relative to grid resolution.
+        }
     """
     import rasterio
     from rasterio.features import geometry_window
 
-    indexes_for_geoms = {}
+    indices_for_geoms = {}
+
+    # Basins that don't intersect or have invalid geometry.
     bad_basin_ids = []
+
+    # Basins that needed all_touched=True fallback.
+    small_basin_ids = []
 
     with rasterio.open(raster_path) as src:
         width, height = src.width, src.height
@@ -107,26 +118,39 @@ def build_zonal_index_map(
 
             # Rasterize the geometry into the window coordinates.
             win_transform = src.window_transform(win)
+
             mask = rasterize(
                 [(geom, 1)],
                 out_shape=(win_height, win_width),
                 transform=win_transform,
                 fill=0,
-                all_touched=all_touched,
+                all_touched=False,
                 dtype='uint8'
                 )
 
             if not mask.any():
+                mask = rasterize(
+                    [(geom, 1)],
+                    out_shape=(win_height, win_width),
+                    transform=win_transform,
+                    fill=0,
+                    all_touched=True,
+                    dtype='uint8'
+                    )
+                small_basin_ids.append(index)
+
+            if not mask. any():
                 bad_basin_ids.append(index)
                 continue
 
-            rows, cols = np.nonzero(mask)  # rows/cols relative to window
+            # rows/cols relative to window.
+            rows, cols = np.nonzero(mask)
 
             # Convert to absolute row/col on the full raster
             abs_rows = rows + int(win.row_off)
             abs_cols = cols + int(win.col_off)
 
-            indexes_for_geoms[int(index)] = (
+            indices_for_geoms[int(index)] = (
                 np.column_stack((abs_rows, abs_cols))
                 )
 
@@ -134,13 +158,14 @@ def build_zonal_index_map(
         'width': width,
         'height': height,
         'crs': crs.to_string(),
-        'indexes': indexes_for_geoms
+        'indices': indices_for_geoms
         }
 
-    if len(bad_basin_ids):
-        print(f"Warning: {len(bad_basin_ids)} basins are empty.")
+    if len(small_basin_ids):
+        print(f"Warning: we used 'all_touched=True' for "
+              f"{len(small_basin_ids)} small basins.")
 
-    return zonal_index_map, bad_basin_ids
+    return zonal_index_map, {'bad': bad_basin_ids, 'small': small_basin_ids}
 
 
 def extract_zonal_means(
@@ -171,7 +196,7 @@ def extract_zonal_means(
     np.ndarray
         Array of mean values, one per geometry.
     """
-    n_geoms = len(zonal_index_map['indexes'])
+    n_geoms = len(zonal_index_map['indices'])
     mean_values = np.empty(n_geoms, dtype=np.float32)
     basin_ids = np.empty(n_geoms, dtype=np.int64)
 
@@ -183,12 +208,12 @@ def extract_zonal_means(
         data = src.read(1)
         nodata = src.nodata
 
-        for i, basin_id in enumerate(zonal_index_map['indexes'].keys()):
+        for i, basin_id in enumerate(zonal_index_map['indices'].keys()):
             basin_ids[i] = basin_id
 
             # Extract values.
-            indexes = zonal_index_map['indexes'].get(basin_id)
-            rows, cols = indexes[:, 0], indexes[:, 1]
+            indices = zonal_index_map['indices'].get(basin_id)
+            rows, cols = indices[:, 0], indices[:, 1]
             array = data[rows, cols]
 
             # Compute mean, excluding nodata
@@ -254,10 +279,10 @@ if __name__ == '__main__':
 
         # For each basin, set all extracted pixels to nodata
         for basin_id in example_basin_ids:
-            indexes = zonal_index_map['indexes'].get(basin_id)
+            indices = zonal_index_map['indices'].get(basin_id)
 
             # indices: Nx2 array of [row, col]
-            rows, cols = indexes[:, 0], indexes[:, 1]
+            rows, cols = indices[:, 0], indices[:, 1]
 
             # Apply nodata value
             data[rows, cols] = nodata
