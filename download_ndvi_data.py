@@ -9,6 +9,10 @@
 # Repository: https://github.com/geo-stack/sahel
 # =============================================================================
 
+# MODIS NDVI (MOD13A1) data from NASA EarthData is only available since the
+# year 2000 because the MODIS sensors aboard Terra and Aqua satellites were
+# launched in late 1999 and 2002, respectively.
+
 # ---- Standard imports
 from pathlib import Path
 import shutil
@@ -130,14 +134,15 @@ for hdf_name in hdf_names:
 
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
-vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
 if not vrt_index_path.exists():
     vrt_index = pd.DataFrame(
         columns=['file'] + list(basins_gdf.index),
         index=pd.date_range('2000-01-01', '2025-12-31')
         )
 else:
-    vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
+    vrt_index = pd.read_csv(
+        vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+        )
 
 ntot = len(tif_file_index)
 i = 0
@@ -194,9 +199,6 @@ vrt_index = pd.read_csv(
     vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
     )
 
-wtd_gdf = gpd.read_file(datadir / "data" / "wtd_obs_all.gpkg")
-wtd_gdf = wtd_gdf.set_index("ID", drop=True)
-
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 basins_gdf.index = basins_gdf.index.astype(int)
@@ -215,6 +217,7 @@ zonal_index_map, bad_basin_ids = build_zonal_index_map(
 # Extract NDVI means for each basin.
 
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
+vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
 
 ntot = len(tif_file_index)
 count = 0
@@ -232,3 +235,7 @@ for vrt_name in vrt_fnames:
     count += 1
 
 vrt_index.to_csv(vrt_index_path)
+
+# %%
+
+# Update the WTD dataset.
