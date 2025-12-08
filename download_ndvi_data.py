@@ -24,6 +24,14 @@ from hdml.ed_helpers import earthaccess_login, MOD13Q1_hdf_to_geotiff
 
 MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h16v08', 'h17v08', 'h18v08']
 
+HDF_DIR = datadir / 'ndvi'
+
+TIF_DIR = HDF_DIR / 'tiles'
+TIF_DIR.mkdir(parents=True, exist_ok=True)
+
+VRT_DIR = HDF_DIR / 'vrt'
+VRT_DIR.mkdir(parents=True, exist_ok=True)
+
 # %%
 
 # Authenticate to Earthdata and get available datasets
@@ -57,12 +65,7 @@ for avail_hdf_name in avail_hdf_names:
 
 # Download the NDVI MODIS tiles and convert to GeoTIFF.
 
-hdf_dir = datadir / 'ndvi'
-
-tif_dir = hdf_dir / 'tiles'
-tif_dir.mkdir(parents=True, exist_ok=True)
-
-index_fpath = tif_dir.parent / 'tiles_index.csv'
+index_fpath = TIF_DIR.parent / 'tiles_index.csv'
 if not index_fpath.exists():
     index = pd.MultiIndex.from_tuples([], names=['date_start', 'date_end'])
     index_df = pd.DataFrame(index=index)
@@ -77,13 +80,12 @@ n = len(hdf_names)
 for hdf_name in hdf_names:
     progress = f"[{i+1:02d}/{n}]"
 
-    hdf_fpath = hdf_dir / (hdf_name + '.hdf')
-    tif_fpath = tif_dir / (hdf_name + '.tif')
+    hdf_fpath = HDF_DIR / (hdf_name + '.hdf')
+    tif_fpath = TIF_DIR / (hdf_name + '.tif')
     bck_fpath = Path('E:/MODIS NDVI 250m/') / hdf_fpath.name
 
     # Skip if tile already downloaded and processed file.
     if tif_fpath.exists():
-        print(f'{progress} Skipping because it is already processed.')
         i += 1
         continue
 
@@ -93,7 +95,7 @@ for hdf_name in hdf_names:
     if not hdf_fpath.exists():
         url = base_url + '/' + hdf_name + '/' + hdf_name + '.hdf'
         try:
-            earthaccess.download(url, hdf_dir, show_progress=False)
+            earthaccess.download(url, HDF_DIR, show_progress=False)
         except Exception:
             print(f'{progress} Failed to download NDVI data for {hdf_name}.')
             break
@@ -111,8 +113,6 @@ for hdf_name in hdf_names:
         shutil.move(str(hdf_fpath), str(bck_fpath))
 
     i += 1
-    if i > 1750:
-        break
 
 
 # %%
@@ -135,21 +135,25 @@ if not vrt_index_path.exists():
 else:
     vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
 
-
+ntot = len(tif_file_index)
+i = 0
 for index, row in tif_file_index.iterrows():
+    print(f"[{i+1:02d}/{ntot}] Producing VRT for {index[0]}...")
+
     # Define the name of the VRT file.
     start = index[0].replace('-', '')
     end = index[1].replace('-', '')
-    vrt_path = datadir / 'ndvi' / f"NDVI_MOD13Q1_{start}_{end}.vrt"
+    vrt_path = VRT_DIR / f"NDVI_MOD13Q1_{start}_{end}.vrt"
 
     # Define the list of tiles to add to the VRT.
-    tif_paths = [tif_dir / tif_fname for tif_fname in row.values]
+    tif_paths = [TIF_DIR / tif_fname for tif_fname in row.values]
     assert len(tif_paths) == 6
 
     # Build the VRT.
-    ds = gdal.BuildVRT(vrt_path, tif_paths)
-    ds.FlushCache()
-    del ds
+    if not vrt_path.exists():
+        ds = gdal.BuildVRT(vrt_path, tif_paths)
+        ds.FlushCache()
+        del ds
 
     # Reprojected VRT.
     dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
@@ -158,46 +162,61 @@ for index, row in tif_file_index.iterrows():
         datadir / 'ndvi' / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.vrt"
         )
 
-    warp_options = gdal.WarpOptions(
-        dstSRS='ESRI:102022',
-        format='VRT',
-        resampleAlg='bilinear',
-        multithread=True,
-        )
+    if not vrt_reprojected.exists():
+        warp_options = gdal.WarpOptions(
+            dstSRS='ESRI:102022',
+            format='VRT',
+            resampleAlg='bilinear',
+            multithread=True,
+            )
 
-    ds_reproj = gdal.Warp(
-        str(vrt_reprojected),
-        str(vrt_path),
-        options=warp_options
-        )
-    ds_reproj.FlushCache()
-    del ds_reproj
+        ds_reproj = gdal.Warp(
+            str(vrt_reprojected),
+            str(vrt_path),
+            options=warp_options
+            )
+        ds_reproj.FlushCache()
+        del ds_reproj
 
-    # Update the VRT file index and clean temp VRT file.
+    # Update the VRT file index.
     vrt_index.loc[pd.date_range(*index), 'file'] = vrt_reprojected.name
-    vrt_index.to_csv(vrt_index_path)
+    i += 1
 
-    break
+vrt_index.to_csv(vrt_index_path)
 
 # %%
 import numpy as np
-from hdml.gishelpers import extract_zonal_means
+from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
+
+vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
+vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
 
 wtd_gdf = gpd.read_file(datadir / "data" / "wtd_obs_all.gpkg")
 wtd_gdf = wtd_gdf.set_index("ID", drop=True)
 
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
-
-basin_geom = basins_gdf.geometry.iloc[0]
+basins_gdf.index = basins_gdf.index.astype(int)
 
 vrt_fnames = vrt_index.file
 vrt_fnames = vrt_fnames[~pd.isnull(vrt_fnames)]
 vrt_fnames = np.unique(vrt_fnames)
 
+
+zonal_index_map, bad_basin_ids = build_zonal_index_map(
+    datadir / 'ndvi' / vrt_fnames[0], basins_gdf
+    )
+zonal_index_map['indexes'][basins_gdf.index[0]]
+
+# %%
+
+basin_geom = basins_gdf.geometry.iloc[0]
+
+ntot = len(tif_file_index)
+count = 0
 for vrt_name in vrt_fnames:
-    print(f'Processing {vrt_name}')
-    vrt_path = datadir / 'ndvi' / vrt_fnames[0]
+    print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
+    vrt_path = datadir / 'ndvi' / vrt_name
 
     mean_ndvi = extract_zonal_means(vrt_path, basins_gdf.geometry)
     mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
@@ -205,3 +224,7 @@ for vrt_name in vrt_fnames:
     mask_index = vrt_index.file == vrt_path.name
     for i, basin_id in enumerate(basins_gdf.index):
         vrt_index.loc[mask_index, int(basin_id)] = mean_ndvi[i]
+
+    count += 1
+
+vrt_index.to_csv(vrt_index_path)
