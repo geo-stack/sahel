@@ -202,3 +202,65 @@ def extract_zonal_means(
                 mean_values[i] = np.nan
 
     return mean_values
+
+
+if __name__ == '__main__':
+    import rasterio
+    import numpy as np
+    import pandas as pd
+    from pathlib import Path
+    from hdml import __datadir__ as datadir
+
+    # Validate 'build_zonal_index_map' function.
+
+    vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
+    vrt_index = pd.read_csv(vrt_index_path, index_col=0, parse_dates=True)
+
+    wtd_gdf = gpd.read_file(datadir / "data" / "wtd_obs_all.gpkg")
+    wtd_gdf = wtd_gdf.set_index("ID", drop=True)
+
+    basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
+    basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
+    basins_gdf.index = basins_gdf.index.astype(int)
+
+    vrt_fnames = vrt_index.file
+    vrt_fnames = vrt_fnames[~pd.isnull(vrt_fnames)]
+    vrt_fnames = np.unique(vrt_fnames)
+
+    vrt_path = datadir / 'ndvi' / vrt_fnames[0]
+
+    zonal_index_map, bad_basin_ids = build_zonal_index_map(
+        vrt_path, basins_gdf
+        )
+
+    # Select a couple of basin ids to test (e.g. [101, 205, 399])
+    example_basin_ids = basins_gdf.index[[0, 3, 5]]
+    print(example_basin_ids)
+
+    example_basins_gdf = basins_gdf.loc[example_basin_ids]
+    example_basins_gdf.to_file(
+        datadir / "data" / "example_basin_geometry.gpkg",
+        layer='example basin',
+        driver="GPKG"
+        )
+
+    out_tif_path = vrt_path.with_suffix('.tif')
+    with rasterio.open(vrt_path) as src:
+        data = src.read(1)
+        out_profile = src.profile.copy()
+        nodata = src.nodata
+
+        # For each basin, set all extracted pixels to nodata
+        for basin_id in example_basin_ids:
+            indexes = zonal_index_map['indexes'].get(basin_id)
+
+            # indices: Nx2 array of [row, col]
+            rows, cols = indexes[:, 0], indexes[:, 1]
+
+            # Apply nodata value
+            data[rows, cols] = nodata
+
+        # Write result to a new GeoTIFF
+        out_profile.update(driver='GTiff')
+        with rasterio.open(out_tif_path, 'w', **out_profile) as dst:
+            dst.write(data, 1)
