@@ -97,12 +97,11 @@ def build_zonal_index_map(
         crs = src.crs
 
         for index, row in basin_gdf.iterrows():
-
             geom = row.geometry
 
             try:
-                # Get the minimal window covering the geometry (speeds up
-                # rasterize)
+                # Get the minimal window covering the geometry
+                # (speeds up rasterize).
                 win = geometry_window(src, [geom], pad_x=0, pad_y=0)
             except Exception:
                 # Geometry does not intersect raster or other failure.
@@ -119,6 +118,7 @@ def build_zonal_index_map(
             # Rasterize the geometry into the window coordinates.
             win_transform = src.window_transform(win)
 
+            # Try pixel-center method first
             mask = rasterize(
                 [(geom, 1)],
                 out_shape=(win_height, win_width),
@@ -128,6 +128,7 @@ def build_zonal_index_map(
                 dtype='uint8'
                 )
 
+            # Fallback for small basins.
             if not mask.any():
                 mask = rasterize(
                     [(geom, 1)],
@@ -137,19 +138,21 @@ def build_zonal_index_map(
                     all_touched=True,
                     dtype='uint8'
                     )
+
+                if not mask.any():
+                    bad_basin_ids.append(index)
+                    continue
+
                 small_basin_ids.append(index)
 
-            if not mask. any():
-                bad_basin_ids.append(index)
-                continue
-
-            # rows/cols relative to window.
+            # Extract indices (rows/cols relative to window).
             rows, cols = np.nonzero(mask)
 
-            # Convert to absolute row/col on the full raster
+            # Convert to absolute row/col on the full raster.
             abs_rows = rows + int(win.row_off)
             abs_cols = cols + int(win.col_off)
 
+            # Store as Nx2 array of [row, col] pairs.
             indices_for_geoms[int(index)] = (
                 np.column_stack((abs_rows, abs_cols))
                 )
@@ -161,11 +164,19 @@ def build_zonal_index_map(
         'indices': indices_for_geoms
         }
 
-    if len(small_basin_ids):
-        print(f"Warning: we used 'all_touched=True' for "
-              f"{len(small_basin_ids)} small basins.")
+    basin_metadata = {
+        'bad': bad_basin_ids,
+        'small': small_basin_ids
+        }
 
-    return zonal_index_map, {'bad': bad_basin_ids, 'small': small_basin_ids}
+    if len(small_basin_ids):
+        print(f"Warning: Used all_touched=True for {len(small_basin_ids)} "
+              f"small basins.")
+    if len(bad_basin_ids):
+        print(f"Warning: {len(bad_basin_ids)} basins excluded "
+              f"(no intersection or empty after fallback).")
+
+    return zonal_index_map, basin_metadata
 
 
 def extract_zonal_means(
