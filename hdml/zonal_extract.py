@@ -144,8 +144,7 @@ def build_zonal_index_map(
 
 
 def extract_zonal_means(
-        raster_path: Path,
-        geometries: list[shapely.Geometry],
+        raster_path: Path, zonal_index_map: dict
         ) -> np.ndarray:
     """
     Extract mean raster values for a list of geometries.
@@ -172,36 +171,39 @@ def extract_zonal_means(
     np.ndarray
         Array of mean values, one per geometry.
     """
-    n_geoms = len(geometries)
+    n_geoms = len(zonal_index_map['indexes'])
     mean_values = np.empty(n_geoms, dtype=np.float32)
+    basin_ids = np.empty(n_geoms, dtype=np.int64)
 
     with rasterio.open(raster_path) as src:
+        assert src.width == zonal_index_map['width']
+        assert src.height == zonal_index_map['height']
+        assert src.crs.to_string() == zonal_index_map['crs']
+
+        data = src.read(1)
         nodata = src.nodata
 
-        for i, geom in enumerate(geometries):
-            try:
-                # Mask raster with the geometry.
-                data, transform = mask(
-                    src, [geom], crop=True, filled=True, nodata=nodata
-                )
-                array = data[0]  # Get first band
+        for i, basin_id in enumerate(zonal_index_map['indexes'].keys()):
+            basin_ids[i] = basin_id
 
-                # Compute mean, excluding nodata
-                if nodata is not None:
-                    valid_pixels = array[array != nodata]
-                else:
-                    valid_pixels = array
+            # Extract values.
+            indexes = zonal_index_map['indexes'].get(basin_id)
+            rows, cols = indexes[:, 0], indexes[:, 1]
+            array = data[rows, cols]
 
-                if valid_pixels.size > 0:
-                    mean_values[i] = np.mean(valid_pixels)
-                else:
-                    mean_values[i] = np.nan
+            # Compute mean, excluding nodata
+            if nodata is not None:
+                valid_pixels = array[array != nodata]
+            else:
+                valid_pixels = array
 
-            except ValueError:
+            if valid_pixels.size > 0:
+                mean_values[i] = np.mean(valid_pixels)
+            else:
                 # Geometry doesn't intersect raster.
                 mean_values[i] = np.nan
 
-    return mean_values
+    return mean_values, basin_ids
 
 
 if __name__ == '__main__':
