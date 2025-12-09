@@ -93,17 +93,21 @@ def generate_tiles_bbox(
         input_raster: Path,
         tile_size: int = 5000,
         overlap: int = 0,
-        zone_bbox: tuple = None,
-        filter_points_path: Path = None
         ) -> gpd.GeoDataFrame:
     """
-    Generate bounding box information for tiling a zone within a raster with
-    overlap.
+    Generate bounding box information for tiling a raster with overlap.
 
-    Pre-computes the pixel coordinates for a grid of tiles covering either the
-    full input raster or a specific rectangular zone within it, including both
-    the core (non-overlapping) tile extents and the overlapped extents needed
-    for accurate edge processing.
+    Pre-computes the pixel coordinates for a grid of tiles covering the entire
+    input raster, including both the core (non-overlapping) tile extents and
+    the overlapped extents needed for accurate edge processing.
+
+    All tiles are perfectly square (tile_size x tile_size), and may extend
+    beyond the raster boundaries. When reading tiles, pixels outside the
+    raster will need to be handled appropriately (e.g., using boundless read
+    or padding).
+
+    Use the 'filter_tiles' function to filter tiles (e.g., by geometry or
+    points) on the returned GeoDataFrame.
 
     Parameters
     ----------
@@ -114,19 +118,9 @@ def generate_tiles_bbox(
         excluding overlap). Default is 5000.
     overlap : float, optional
         Overlap distance between adjacent tiles in the same units as the
-        raster's CRS (e.g., meters for ESRI:102022). This overlap ensures
+        raster's CRS (e. g., meters for ESRI: 102022). This overlap ensures
         that edge effects are minimized when processing tiles independently.
         Default is 0.
-    zone_bbox : tuple, optional
-        Rectangular zone to tile in the raster's coordinate system as
-        (minx, miny, maxx, maxy). Coordinates should match the raster's CRS
-        (e.g., ESRI:102022 coordinates in meters). If None, tiles the entire
-        raster.
-    filter_points_path : Path, optional
-        Path to a GeoJSON file containing observation points. If provided,
-        only tiles that contain at least one point will be returned.
-        This is useful for skipping empty tiles during processing.
-        Default is None.
 
     Returns
     -------
@@ -135,19 +129,21 @@ def generate_tiles_bbox(
 
         Columns:
         - 'geometry': Polygon representing the core tile extent in the
-          raster's CRS
+          raster's CRS (always tile_size x tile_size, may extend beyond raster)
         - 'core_bbox_pixels': [x_start, y_start, width, height] - Core tile
           extent without overlap, in pixel coordinates relative to the input
-          raster. Used for the final mosaic.
-        - 'overlap_bbox_pixels': [x_start, y_start, width, height] - Extended
+          raster. Always [x, y, tile_size, tile_size].  May have negative
+          coordinates or extend beyond raster bounds.
+        - 'overlap_bbox_pixels':  [x_start, y_start, width, height] - Extended
           tile extent with overlap, in pixel coordinates. Used for processing
-          to ensure accurate calculations at tile edges.
+          to ensure accurate calculations at tile edges.  May extend beyond
+          raster bounds.
         - 'crop_x_offset': int - Number of pixels to skip from the left edge
-          of the overlapped tile to extract the core tile.
+          of the overlapped tile to extract the core tile.  Always equal to
+          overlap_pixels.
         - 'crop_y_offset':  int - Number of pixels to skip from the top edge
-          of the overlapped tile to extract the core tile.
-
-        Note: Tiles smaller than 10x10 pixels are excluded from the output.
+          of the overlapped tile to extract the core tile.  Always equal to
+          overlap_pixels.
     """
     # Open raster to get dimensions, transform, and CRS.
     with rasterio. open(input_raster) as src:
@@ -163,106 +159,41 @@ def generate_tiles_bbox(
     overlap_pixels = int(round(overlap / pixel_size))
 
     print(f"Raster resolution: {pixel_size:.2f} units/pixel")
+    print(f"Raster dimensions: {raster_width} x {raster_height} pixels")
     print(f"Overlap: {overlap:.2f} units = {overlap_pixels} pixels")
 
-    # Convert geographic zone bounds to pixel coordinates if provided.
-    if zone_bbox is not None:
-        minx, miny, maxx, maxy = zone_bbox
+    # Calculate number of tiles needed to cover the entire raster.
+    n_tiles_x = math.ceil(raster_width / tile_size)
+    n_tiles_y = math.ceil(raster_height / tile_size)
 
-        # Validate that bounds are in correct order.
-        if minx >= maxx or miny >= maxy:
-            raise ValueError(
-                f"Invalid zone bounds: minx must be < maxx and miny must "
-                f"be < maxy. Got minx={minx}, miny={miny}, maxx={maxx}, "
-                f"maxy={maxy}."
-                )
-
-        # Convert geographic bounds to pixel window.
-        window = from_bounds(minx, miny, maxx, maxy, transform=transform)
-
-        # Extract pixel coordinates.
-        zone_x_min = int(round(window.col_off))
-        zone_y_min = int(round(window.row_off))
-        zone_x_max = int(round(window.col_off + window.width))
-        zone_y_max = int(round(window.row_off + window.height))
-
-        # Clamp to raster bounds.
-        zone_x_min = max(0, zone_x_min)
-        zone_y_min = max(0, zone_y_min)
-        zone_x_max = min(raster_width, zone_x_max)
-        zone_y_max = min(raster_height, zone_y_max)
-
-        # Validate that zone intersects with raster.
-        if zone_x_min >= raster_width or zone_y_min >= raster_height:
-            raise ValueError(
-                f"Zone bbox does not intersect with raster. "
-                f"Zone in pixels: ({zone_x_min}, {zone_y_min}, "
-                f"{zone_x_max}, {zone_y_max}), "
-                f"Raster size: ({raster_width}, {raster_height})"
-                )
-        if zone_x_max <= 0 or zone_y_max <= 0:
-            raise ValueError(
-                f"Zone bbox does not intersect with raster. "
-                f"Zone in pixels: ({zone_x_min}, {zone_y_min}, "
-                f"{zone_x_max}, {zone_y_max})"
-            )
-        print(f"Tiling zone: geographic bounds "
-              f"({minx:.2f}, {miny:.2f}, {maxx:.2f}, {maxy:.2f})")
-        print(f"             pixel bounds "
-              f"({zone_x_min}, {zone_y_min}, {zone_x_max}, {zone_y_max})")
-    else:
-        # Tile the entire raster.
-        zone_x_min, zone_y_min = 0, 0
-        zone_x_max, zone_y_max = raster_width, raster_height
-        print(f"Tiling entire raster: {raster_width} x {raster_height} pixels")
-
-    # Calculate zone dimensions.
-    zone_width = zone_x_max - zone_x_min
-    zone_height = zone_y_max - zone_y_min
-
-    # Calculate number of tiles needed for the zone.
-    n_tiles_x = math.ceil(zone_width / tile_size)
-    n_tiles_y = math.ceil(zone_height / tile_size)
+    print(f"Tile grid:  {n_tiles_y} rows x {n_tiles_x} cols = "
+          f"{n_tiles_y * n_tiles_x} tiles")
 
     # Build list of tile records
     tile_records = []
 
     for ty, tx in itertools.product(range(n_tiles_y), range(n_tiles_x)):
-        # Calculate the CORE tile extent WITHOUT overlap (for final mosaic)
-        # relative to the ZONE.
-        x_start_in_zone = tx * tile_size
-        y_start_in_zone = ty * tile_size
-        x_end_in_zone = min(zone_width, (tx + 1) * tile_size)
-        y_end_in_zone = min(zone_height, (ty + 1) * tile_size)
+        # Calculate the CORE tile extent WITHOUT overlap
+        # All tiles are perfectly square:  tile_size x tile_size
+        # They may extend beyond the zone/raster boundaries
 
-        # Convert to absolute raster coordinates.
-        x_start = zone_x_min + x_start_in_zone
-        y_start = zone_y_min + y_start_in_zone
-        x_end = zone_x_min + x_end_in_zone
-        y_end = zone_y_min + y_end_in_zone
+        x_start = tx * tile_size
+        y_start = ty * tile_size
+        x_end = x_start + tile_size
+        y_end = y_start + tile_size
 
-        w = x_end - x_start
-        h = y_end - y_start
+        w = tile_size
+        h = tile_size
 
         # Calculate tile extent WITH overlap for processing
-        # Constrained by both zone bounds AND raster bounds.
-        x_start_ovlp = max(0, zone_x_min + tx * tile_size - overlap_pixels)
-        y_start_ovlp = max(0, zone_y_min + ty * tile_size - overlap_pixels)
-        x_end_ovlp = min(
-            raster_width,
-            zone_x_min + (tx + 1) * tile_size + overlap_pixels
-            )
-        y_end_ovlp = min(
-            raster_height,
-            zone_y_min + (ty + 1) * tile_size + overlap_pixels
-            )
+        # Also allowed to extend beyond raster bounds
+        x_start_ovlp = x_start - overlap_pixels
+        y_start_ovlp = y_start - overlap_pixels
+        x_end_ovlp = x_end + overlap_pixels
+        y_end_ovlp = y_end + overlap_pixels
 
         w_ovlp = x_end_ovlp - x_start_ovlp
         h_ovlp = y_end_ovlp - y_start_ovlp
-
-        # Skip tiny edge tiles
-        if w_ovlp < 10 or h_ovlp < 10:
-            continue
 
         # Convert pixel coordinates to geographic coordinates for geometry
         # Using the core tile extent (without overlap)
@@ -279,22 +210,16 @@ def generate_tiles_bbox(
             'geometry': tile_geom,
             'core_bbox_pixels': [x_start, y_start, w, h],
             'ovlp_bbox_pixels': [x_start_ovlp, y_start_ovlp, w_ovlp, h_ovlp],
-            'crop_x_offset': x_start - x_start_ovlp,
-            'crop_y_offset': y_start - y_start_ovlp
+            'crop_x_offset': overlap_pixels,
+            'crop_y_offset': overlap_pixels
             })
 
     # Create GeoDataFrame
     tiles_gdf = gpd.GeoDataFrame(tile_records, crs=crs)
     tiles_gdf = tiles_gdf.set_index('tile_index', drop=True)
 
-    # Filter tiles by points if requested.
-    if filter_points_path is not None:
-        tiles_gdf = filter_tiles(
-            points_path=filter_points_path,
-            tiles_gdf=tiles_gdf
-            )
-
-    print(f"Generated {len(tiles_gdf)} valid tiles.")
+    print(f"Generated {len(tiles_gdf)} tiles "
+          f"(all {tile_size} x {tile_size} pixels).")
 
     return tiles_gdf
 
