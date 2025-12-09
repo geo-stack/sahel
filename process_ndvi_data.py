@@ -213,21 +213,13 @@ vrt_fnames = vrt_index.file
 vrt_fnames = vrt_fnames[~pd.isnull(vrt_fnames)]
 vrt_fnames = np.unique(vrt_fnames)
 
-
 zonal_index_map, bad_basin_ids = build_zonal_index_map(
     VRT_DIR / vrt_fnames[0], basins_gdf
     )
 
-# %%
-
 # Extract NDVI means for each basin.
 
-tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
-vrt_index = pd.read_csv(
-    vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
-    )
-
-ntot = len(tif_file_index)
+ntot = len(vrt_fnames)
 count = 0
 for vrt_name in vrt_fnames:
     print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
