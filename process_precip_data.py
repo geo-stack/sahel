@@ -42,7 +42,7 @@ basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 basins_gdf.index = basins_gdf.index.astype(int)
 
-tif_index_fpath = DEST_DIR / 'tif_index.csv'
+tif_index_fpath = DEST_DIR / 'precip_tif_index.csv'
 
 # Read Africa landmass and get bounding box.
 africa_gdf = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
@@ -53,6 +53,8 @@ base_url = "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat"
 
 
 # %%
+
+YEAR_RANGE = range(2000, 2026)
 
 # Download the CHIRPS daily sat data.
 
@@ -67,8 +69,12 @@ else:
         tif_index_fpath, index_col=0, parse_dates=True, dtype={'file': str}
         )
 
-ndownload = 0
-for year in range(2025, 2026):
+# Get the list of tif files available for download on the CHIRPS server.
+
+print('Fetching available files on the CHIRPS server...')
+
+chirp_files = {}
+for year in YEAR_RANGE:
     year_url = base_url + f'/{year}'
 
     # Get the list of tif files available for download.
@@ -80,9 +86,18 @@ for year in range(2025, 2026):
              soup.find_all("a") if
              a['href'].endswith(".tif")]
 
+    chirp_files[year] = files
+
+# Download and process the files.
+
+for year, files in chirp_files.items():
+
+    print(f"Downloading CHIRPS daily precip tifs for year {year}...")
+
     for file in files:
-        dtime = datetime.strptime(file[-14:-4], '%Y.%m.%d')
-        file_url = year_url + f'/{file}'
+        file_url = base_url + f'/{year}/{file}'
+
+        dtime = datetime.strptime(file_url[-14:-4], '%Y.%m.%d')
 
         global_tif_fpath = DEST_DIR / file
 
@@ -97,10 +112,15 @@ for year in range(2025, 2026):
 
         print(f"[{str(dtime)[:10]}] Downloading tif file...", end='')
 
-        resp = requests.get(file_url, stream=False, timeout=60)
-        resp.raise_for_status()
-        with open(global_tif_fpath, "wb") as fp:
-            fp.write(resp.content)
+        try:
+            resp = requests.get(file_url, stream=False, timeout=60)
+            resp.raise_for_status()
+            with open(global_tif_fpath, "wb") as fp:
+                fp.write(resp.content)
+        except Exception as err:
+            tif_index.loc[dtime, 'file'] = np.nan
+            tif_index.to_csv(tif_index_fpath)
+            raise err
 
         clip_and_project_raster(
             global_tif_fpath, tif_fpath,
@@ -109,13 +129,10 @@ for year in range(2025, 2026):
 
         global_tif_fpath.unlink()
 
-        ndownload += 1
-
         print(' done')
 
-print()
 print('All precip tif file downloaded successfully.')
-print()
+
 print('Saving tif index dataframe to file...', end='')
 tif_index.to_csv(tif_index_fpath)
 print('done')
@@ -145,7 +162,7 @@ for index, row in tif_index.iterrows():
 
     tif_path = DEST_DIR / row.file
 
-    print(f"[{str(index)[:10]}] Extracing basin mean precip...")
+    print(f"[{str(index)[:10]}] Extracting basin mean precip...")
 
     mean_precip, basin_ids = extract_zonal_means(tif_path, zonal_index_map)
 
