@@ -13,6 +13,8 @@
 # year 2000 because the MODIS sensors aboard Terra and Aqua satellites were
 # launched in late 1999 and 2002, respectively.
 
+# https://www.earthdata.nasa.gov/data/catalog/lpcloud-mod13q1-006
+
 # ---- Standard imports
 from pathlib import Path
 import shutil
@@ -25,12 +27,17 @@ import numpy as np
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
-from hdml.ed_helpers import earthaccess_login, MOD13Q1_hdf_to_geotiff
+from hdml.ed_helpers import (
+    earthaccess_login, MOD13Q1_hdf_to_geotiff, get_MOD13Q1_hdf_metadata)
 from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
-MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h16v08', 'h17v08', 'h18v08']
+MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07',
+                    'h16v08', 'h17v08', 'h18v08', 'h19v08']
 
 NDVI_DIR = datadir / 'ndvi'
+
+HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS NDVI 250m")
+HDF_DIR.mkdir(parents=True, exist_ok=True)
 
 TIF_DIR = NDVI_DIR / 'tiles'
 TIF_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,6 +52,7 @@ basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 basins_gdf.index = basins_gdf.index.astype(int)
 
+
 # %%
 
 # Authenticate to Earthdata and get available datasets
@@ -53,8 +61,8 @@ print("Authenticating with NASA Earthdata...")
 earthaccess = earthaccess_login()
 
 # Get the list of available hDF names from the NDVI MODIS dataset.
-print("Getting the list of MODIS datasets from earthdata (might take a few "
-      "minutes)...")
+print("Getting the list of MODIS datasets from earthdata (this might take a "
+      "few minutes)...")
 
 granules = earthaccess.search_data(
     short_name="MOD13Q1",
@@ -100,38 +108,39 @@ n = len(hdf_names)
 for hdf_name, url in hdf_names.items():
     progress = f"[{i+1:02d}/{n}]"
 
-    hdf_fpath = NDVI_DIR / (hdf_name + '.hdf')
-    tif_fpath = TIF_DIR / (hdf_name + '.tif')
-    bck_fpath = Path('E:/MODIS NDVI 250m/') / hdf_fpath.name
+    # Download the MODIS HDF file.
 
-    # Skip if tile already downloaded and processed file.
-    if tif_fpath.exists():
-        i += 1
-        continue
+    hdf_fpath = HDF_DIR / (hdf_name + '.hdf')
 
-    print(f'{progress} Downloading MODIS HDF file...')
-
-    # Download the MODIS HDF file and convert to GeoTIFF.
     if not hdf_fpath.exists():
+        print(f'{progress} Downloading MODIS HDF file...')
         try:
-            earthaccess.download(url, NDVI_DIR, show_progress=False)
+            earthaccess.download(url, HDF_DIR, show_progress=False)
         except Exception:
             print(f'{progress} Failed to download NDVI data for {hdf_name}.')
+            index_df.to_csv(index_fpath)
             break
 
-    print(f'{progress} Converting to GeoTIFF...')
-    tile_name, date_start, date_end, metadata = MOD13Q1_hdf_to_geotiff(
-        hdf_fpath, 0, tif_fpath)
+    # Convert MODIS HDF file to GeoTIFF.
+
+    tif_fpath = TIF_DIR / (hdf_name + '.tif')
+
+    if not tif_fpath.exists():
+        print(f'{progress} Converting to GeoTIFF...')
+        tile_name, date_start, date_end = MOD13Q1_hdf_to_geotiff(
+            hdf_fpath, 0, tif_fpath)
+    else:
+        hdf_metadata = get_MOD13Q1_hdf_metadata(hdf_fpath)
+        date_start = hdf_metadata['RANGEBEGINNINGDATE']
+        date_end = hdf_metadata['RANGEENDINGDATE']
+        tile_name = hdf_metadata['tile_name']
 
     index_df.loc[(date_start, date_end), tile_name] = tif_fpath.name
-    index_df.to_csv(index_fpath)
-
-    # Move file to external hard drive for backup.
-    print(f'{progress} Moving HDF file to backup drive...')
-    if hdf_fpath.exists():
-        shutil.move(str(hdf_fpath), str(bck_fpath))
-
     i += 1
+
+    break
+
+index_df.to_csv(index_fpath)
 
 
 # %%
