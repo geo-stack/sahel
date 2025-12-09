@@ -42,7 +42,7 @@ generate_wl_hist_figures
 """
 
 
-COUNTRIES = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo']
+COUNTRIES = ['Benin', 'Burkina', 'Guinee', 'Mali', 'Niger', 'Togo', 'Chad']
 TARGET_CRS = "ESRI:102022"  # Africa Albers Equal Area Conic
 
 
@@ -142,7 +142,7 @@ def read_obs_wl(filename) -> pd.DataFrame:
 
 def _normalize_date(val) -> datetime:
     """Normalize various date string formats to a datetime object."""
-    if val == '00:00:00' or val.strip() == '':
+    if pd.isnull(val) or val == '00:00:00' or val.strip() == '':
         return pd.NaT
 
     # Pattern: Year only, e.g. '1976'.
@@ -159,6 +159,15 @@ def _normalize_date(val) -> datetime:
         return datetime.strptime(
             f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "%Y-%m-%d"
             )
+
+    # Pattern: DD/MM/YY.
+    m = re.fullmatch(r'(\d{2})/(\d{2})/(\d{2})', val)
+    if m:
+        day, month, year = m.group(1), m.group(2), int(m.group(3))
+        year = year + 2000 if year <= 25 else year + 1900
+
+        # Convert to ISO format.
+        return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
 
     # Pattern: DD/MM/YYYY.
     m = re.fullmatch(r'(\d{2})/(\d{2})/(\d{4})', val)
