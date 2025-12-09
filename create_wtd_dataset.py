@@ -102,13 +102,15 @@ original_count = len(mask)
 removed_count = np.sum(mask)
 print(f"Removed {removed_count} points (from {original_count}) for which "
       f"daily climatic data are needed before {2000} or after {year_max}.")
+print(f'Final dataset has {len(gwl_gdf)} points.')
 
 # Save the water table observations dataset.
 gwl_gdf.to_file(datadir / "data" / "wtd_obs_all.gpkg", driver="GPKG")
 
-# Save the basins geometry.
+# Save the basins geometry (we keep only the ones with water level obs).
 basins_gdf = basins_gdf.set_index('HYBAS_ID', drop=True)
 basins_gdf = basins_gdf.loc[gwl_gdf['HYBAS_ID'].unique()]
 basins_gdf = basins_gdf['geometry']
+
 
 basins_gdf.to_file(datadir / "data" / "wtd_basin_geometry.gpkg", driver="GPKG")
