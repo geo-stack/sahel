@@ -67,7 +67,8 @@ else:
         tif_index_fpath, index_col=0, parse_dates=True, dtype={'file': str}
         )
 
-for year in range(2000, 2026):
+ndownload = 0
+for year in range(2025, 2026):
     year_url = base_url + f'/{year}'
 
     # Get the list of tif files available for download.
@@ -92,11 +93,9 @@ for year in range(2000, 2026):
 
         # Skip if already downloaded.
         if tif_fpath.exists():
-            print(f"[{str(dtime)[:10]}] Skipping because "
-                  f"tif file already exists.")
             continue
 
-        print(f"[{str(dtime)[:10]}] Downloading tif file...")
+        print(f"[{str(dtime)[:10]}] Downloading tif file...", end='')
 
         resp = requests.get(file_url, stream=False, timeout=60)
         resp.raise_for_status()
@@ -110,7 +109,16 @@ for year in range(2000, 2026):
 
         global_tif_fpath.unlink()
 
+        ndownload += 1
+
+        print(' done')
+
+print()
+print('All precip tif file downloaded successfully.')
+print()
+print('Saving tif index dataframe to file...', end='')
 tif_index.to_csv(tif_index_fpath)
+print('done')
 
 # %%
 
@@ -127,8 +135,6 @@ tif_fnames = np.unique(tif_fnames)
 zonal_index_map, small_basin_ids = build_zonal_index_map(
     DEST_DIR / tif_fnames[0], basins_gdf
     )
-
-# %%
 
 # Extract precip means for each basin.
 
