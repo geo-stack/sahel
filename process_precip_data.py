@@ -56,7 +56,7 @@ base_url = "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat"
 
 YEAR_RANGE = range(2000, 2026)
 
-# Download the CHIRPS daily sat data.
+# Download the CHIRPS daily sat data for year in YEAR_RANGE.
 
 if not tif_index_fpath.exists():
     tif_index = pd.DataFrame(
