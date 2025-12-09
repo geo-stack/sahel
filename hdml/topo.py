@@ -21,8 +21,8 @@ from scipy.ndimage import distance_transform_edt
 from skimage.morphology import skeletonize, remove_small_objects
 
 # ---- Local imports
-from sahel.math import bresenham_line, precompute_spiral_offsets
-from sahel.localfilters import local_stats_numba, downslope_stats_numba
+from hdml.math import bresenham_line, precompute_spiral_offsets
+from hdml.localfilters import local_stats_numba, downslope_stats_numba
 
 
 def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,

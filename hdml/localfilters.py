@@ -15,7 +15,7 @@ from numba import njit, prange
 
 
 # ---- Local imports
-from sahel.math import bresenham_line
+from hdml.math import bresenham_line
 
 
 # ---- Filter functions
