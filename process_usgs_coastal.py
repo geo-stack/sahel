@@ -12,7 +12,7 @@
 # You need to download the 'USGSEsriWCMC_GlobalIslands_v3_mpk.zip'
 # archive from:
 # https://www.sciencebase.gov/catalog/item/63bdf25dd34e92aad3cda273
-# and copy it to the folder './sahel/data/coastline'
+# and copy it to the folder './hdml/data/coastline'
 
 # See also:
 # https://data.usgs.gov/datacatalog/data/USGS:63bdf25dd34e92aad3cda273

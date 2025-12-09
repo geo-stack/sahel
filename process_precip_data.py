@@ -68,9 +68,6 @@ else:
         )
 
 for year in range(2000, 2026):
-    if year > 2005:
-        break
-
     year_url = base_url + f'/{year}'
 
     # Get the list of tif files available for download.

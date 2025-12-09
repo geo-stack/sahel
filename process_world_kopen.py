@@ -26,7 +26,9 @@ gdal.UseExceptions()
 adf_folder_path = (
     datadir / 'climate_zones' / 'hess-11-1633-2007-supplement' /
     'Raster files' / 'world_koppen')
-dem_path = datadir / 'merit' / 'elv_mosaic.tiff'
+
+dem_path = datadir / 'dem' / 'nasadem_102022.vrt'
+
 output_path = datadir / 'climate_zones' / 'world_koppen.tiff'
 
 # %%
