@@ -77,55 +77,108 @@ def earthaccess_login():
     return earthaccess
 
 
-def MOD13Q1_hdf_to_geotiff(
-        hdf_file: Path, subdataset_index: int, output_file: Path
-        ):
+def get_MOD13Q1_hdf_metadata(hdf_file: Path, subdataset_index: int = 0):
     """
-    Convert MODIS HDF subdataset to GeoTIFF.
-
-    Need to install:
-        > conda install -c conda-forge libgdal-hdf4
+    Extract metadata from a MODIS MOD13Q1 HDF subdataset.
 
     Parameters
     ----------
-    hdf_file : str or Path
-        Path to HDF file.
-    subdataset_index : int
-        Index of subdataset to extract (0-based).
-    output_file : str or Path, optional
-        Output GeoTIFF path. If None, auto-generate from input name.
-    """
-    hdf_file = Path(hdf_file)
+    hdf_file : Path
+        Path to the MODIS HDF file (e.g., MOD13Q1.A2020001.h21v08.*. hdf).
+    subdataset_index :  int, optional
+        Index of the subdataset to read (0-based). Default is 0.
+        MOD13Q1 typically contains multiple subdatasets:
+        - 0: 250m 16 days NDVI
+        - 1: 250m 16 days EVI
+        - 2: 250m 16 days VI Quality
+        - etc.
 
-    # Open HDF and get subdatasets
+    Returns
+    -------
+    dict
+        Dictionary containing subdataset metadata with keys such as:
+        - 'RANGEBEGINNINGDATE': Start date of the 16-day composite
+        - 'RANGEENDINGDATE': End date of the 16-day composite
+        - 'HORIZONTALTILENUMBER':  MODIS tile h-coordinate
+        - 'VERTICALTILENUMBER': MODIS tile v-coordinate
+        - 'long_name': Description of the variable
+        - 'subdataset_name': Full GDAL subdataset identifier string
+
+    Notes
+    -----
+    Requires GDAL compiled with HDF4 support. Install via:
+        conda install -c conda-forge libgdal-hdf4
+    """
+    # Open HDF file and get list of subdatasets
     hdf_ds = gdal.Open(str(hdf_file), gdal.GA_ReadOnly)
 
     subdatasets = hdf_ds.GetSubDatasets()
+    hdf_ds = None
 
     # Open subdataset and get metadata.
     subdataset_name = subdatasets[subdataset_index][0]
     sds = gdal.Open(subdataset_name)
 
-    rangebeginningdate = sds.GetMetadata()['RANGEBEGINNINGDATE']
-    rangeendingdate = sds.GetMetadata()['RANGEENDINGDATE']
-    verticaltilenumber = sds.GetMetadata()['VERTICALTILENUMBER']
-    horizontaltilenumber = sds.GetMetadata()['HORIZONTALTILENUMBER']
-    long_name = sds.GetMetadata()['long_name']
     metadata = sds.GetMetadata().copy()
+    metadata['subdataset_name'] = subdataset_name
+
+    verticaltilenumber = metadata['VERTICALTILENUMBER']
+    horizontaltilenumber = metadata['HORIZONTALTILENUMBER']
+    metadata['tile_name'] = f'h{horizontaltilenumber}v{verticaltilenumber}'
+
     sds = None
 
-    assert long_name == '250m 16 days NDVI'
+    return metadata
 
-    # Convert to GeoTIFF
-    gdal.Translate(
+
+def MOD13Q1_hdf_to_geotiff(
+        hdf_file: Path, subdataset_index: int, output_file: Path
+        ):
+    """
+    Convert a MODIS MOD13Q1 HDF subdataset to GeoTIFF format.
+
+    Extracts the specified subdataset from a MODIS MOD13Q1 HDF file,
+    converts it to GeoTIFF with compression, and returns metadata about
+    the tile and temporal coverage.
+
+    Parameters
+    ----------
+    hdf_file : Path
+        Path to the MODIS MOD13Q1 HDF file.
+    subdataset_index : int
+        Index of subdataset to extract (0-based). Use 0 for 250m 16-day NDVI.
+    output_file : Path
+        Output GeoTIFF file path where the converted raster will be saved.
+
+    Returns
+    -------
+    tuple[str, str, str]
+        A tuple containing:
+        - tile_name :  str
+            MODIS tile identifier (e.g., 'h21v08')
+        - rangebeginningdate : str
+            Start date of the 16-day composite (YYYY-MM-DD)
+        - rangeendingdate :  str
+            End date of the 16-day composite (YYYY-MM-DD)
+    """
+    metadata = get_MOD13Q1_hdf_metadata(str(hdf_file))
+
+    # Validate subdataset type.
+    long_name = metadata['long_name']
+    assert long_name == '250m 16 days NDVI', (
+        f"Expected '250m 16 days NDVI' but got '{long_name}'.  "
+        f"Check subdataset_index or update validation logic."
+        )
+
+    # Convert to GeoTIFF with compression.
+    result = gdal.Translate(
         str(output_file),
-        subdataset_name,
+        metadata['subdataset_name'],
         format='GTiff',
         creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
         )
+    result = None
 
-    hdf_ds = None
-
-    tile_name = f'h{horizontaltilenumber}v{verticaltilenumber}'
-
-    return tile_name, rangebeginningdate, rangeendingdate, metadata
+    return (metadata['tile_name'],
+            metadata['RANGEBEGINNINGDATE'],
+            metadata['RANGEENDINGDATE'])
