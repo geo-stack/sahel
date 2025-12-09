@@ -17,19 +17,20 @@ import geopandas as gpd
 import whitebox
 
 # ---- Local imports.
-from sahel import __datadir__ as datadir
-from sahel.gishelpers import get_dem_filepaths
-from sahel.tiling import (
-    generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles)
-from sahel.topo import (
+from hdml import __datadir__ as datadir
+from hdml.gishelpers import get_dem_filepaths
+from hdml.tiling import (
+    generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles, filter_tiles)
+from hdml.topo import (
     dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist,
     height_above_nearest_drainage, height_below_nearest_ridge, ratio_stream,
     local_stats, stream_stats)
 
 
 OVERWRITE = False
-TILES_OVERLAP_DIR = datadir / 'training' / 'tiles (overlapped)'
-TILES_CROPPED_DIR = datadir / 'training' / 'tiles (cropped)'
+
+TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (overlapped)'
+TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (cropped)'
 
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
@@ -38,21 +39,36 @@ FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'ratio_stream', 'long_hessian_stats', 'long_grad_stats',
             'short_grad_stats', 'stream_grad_stats', 'stream_hessian_stats']
 
+vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
 
 # %% Tiling
 
-obs_points_path = datadir / 'data' / 'wtd_obs_all.geojson'
-
-boundary_gdf = gpd.read_file(datadir / 'data' / 'wtd_obs_boundary.geojson')
-zone_bbox = tuple(boundary_gdf.total_bounds)
-
-vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
-
-tiles_bbox_data = generate_tiles_bbox(
+# Tiles for the whole African continent bbox.
+tiles_gdf_all = generate_tiles_bbox(
     input_raster=vrt_reprojected,
-    tile_size=5000,
+    tile_size=5000,    # in pixels
     overlap=100 * 30,  # 100 pixels at 30 meters resolution
-    filter_points_path=obs_points_path
+    )
+tiles_gdf_all.to_file(
+    datadir / "topo" / "tiles_geom_all.gpkg", driver="GPKG"
+    )
+
+# Tiles clipped to the African continent geometry.
+tiles_gdf_africa = filter_tiles(
+    datadir / 'coastline' / 'africa_landmass.gpkg',
+    tiles_gdf_all
+    )
+tiles_gdf_africa.to_file(
+    datadir / "topo" / "tiles_geom_africa.gpkg", driver="GPKG"
+    )
+
+# Tiles that contains water level observations.
+tiles_gdf = filter_tiles(
+    datadir / 'data' / 'wtd_obs_all.gpkg',
+    tiles_gdf_all
+    )
+tiles_gdf.to_file(
+    datadir / "topo" / "tiles_geom_training.gpkg", driver="GPKG"
     )
 
 
