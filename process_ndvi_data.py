@@ -38,8 +38,8 @@ TIF_DIR.mkdir(parents=True, exist_ok=True)
 VRT_DIR = NDVI_DIR / 'vrt'
 VRT_DIR.mkdir(parents=True, exist_ok=True)
 
-tif_file_index_path = datadir / "ndvi" / "tiles_index.csv"
-vrt_index_path = datadir / 'ndvi' / 'vrt_index.csv'
+tif_file_index_path = datadir / "ndvi" / "ndvi_tiles_index.csv"
+vrt_index_path = datadir / 'ndvi' / 'ndvi_vrt_index.csv'
 
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
