@@ -415,7 +415,7 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
         dem_profile = src.profile
         dem_data = src.read(1)
         dem_nodata = src.nodata
-        nodata_mask = (dem_data == dem_nodata)
+
         dem_width = src.width
         dem_height = src.height
 
@@ -426,18 +426,31 @@ def ratio_dist(dem: Path, dist_stream: Path, dist_ridge: Path, output: Path):
     with rasterio.open(dist_stream) as src:
         assert dem_transform == src.transform
         dist_stream_data = src.read(1)
+        dist_stream_nodata = src.nodata
 
     with rasterio.open(dist_ridge) as src:
         assert dem_transform == src.transform
-        dist_ridge_data = np.maximum(src.read(1), pixel_size)
+        dist_ridge_data = src.read(1)
+        dist_ridge_nodata = src.nodata
 
+    valid_pixels = (
+        (dem_data != dem_nodata) &
+        (dist_stream_data != dist_stream_nodata) &
+        (dist_ridge_data != dist_ridge_nodata)
+        )
+
+    # Calculate ratio with minimum threshold to avoid division by zero.
+    # Ridge pixels (distance = 0) and very small distances are clamped to
+    # pixel_size to prevent numerical instability.
     ratio_dist = np.full(
         (dem_height, dem_width), dem_nodata, dtype=np.float32
         )
-    ratio_dist[~nodata_mask] = (
-        dist_stream_data[~nodata_mask] / dist_ridge_data[~nodata_mask]
+    ratio_dist[valid_pixels] = (
+        dist_stream_data[valid_pixels] /
+        np.maximum(dist_ridge_data[valid_pixels], pixel_size)
         )
 
+    # Write output.
     out_profile = dem_profile.copy()
     out_profile.update(dtype=rasterio.float32, compress='deflate')
     with rasterio.open(output, 'w', **out_profile) as dst:
