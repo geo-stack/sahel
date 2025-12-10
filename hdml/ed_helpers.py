@@ -18,6 +18,7 @@ import keyring
 import earthaccess
 from earthaccess.exceptions import LoginAttemptFailure
 from osgeo import gdal
+import rasterio
 
 # ---- Local imports.
 from hdml import CONF
@@ -177,7 +178,14 @@ def MOD13Q1_hdf_to_geotiff(
         format='GTiff',
         creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
         )
-    result = None
+    del result
+
+    with rasterio.open(output_file, 'r+') as ds:
+        ds.update_tags(
+            tile_name=metadata['tile_name'],
+            date_start=metadata['RANGEBEGINNINGDATE'],
+            date_end=metadata['RANGEENDINGDATE']
+            )
 
     return (metadata['tile_name'],
             metadata['RANGEBEGINNINGDATE'],
