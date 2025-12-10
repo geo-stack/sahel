@@ -93,12 +93,11 @@ for granule in all_granules:
 
 # Download the NDVI MODIS tiles and convert to GeoTIFF.
 
-index_fpath = TIF_DIR.parent / 'tiles_index.csv'
-if not index_fpath.exists():
+if not tif_file_index_path.exists():
     index = pd.MultiIndex.from_tuples([], names=['date_start', 'date_end'])
     index_df = pd.DataFrame(index=index)
 else:
-    index_df = pd.read_csv(index_fpath, index_col=[0, 1])
+    index_df = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
 i = 0
 n = len(hdf_names)
@@ -115,7 +114,7 @@ for hdf_name, url in hdf_names.items():
             earthaccess.download(url, HDF_DIR, show_progress=False)
         except Exception:
             print(f'{progress} Failed to download NDVI data for {hdf_name}.')
-            index_df.to_csv(index_fpath)
+            index_df.to_csv(tif_file_index_path)
             break
 
     # Convert MODIS HDF file to GeoTIFF.
@@ -137,7 +136,7 @@ for hdf_name, url in hdf_names.items():
     index_df.loc[(date_start, date_end), tile_name] = tif_fpath.name
     i += 1
 
-index_df.to_csv(index_fpath)
+index_df.to_csv(tif_file_index_path)
 
 
 # %%
@@ -168,7 +167,7 @@ for index, row in tif_file_index.iterrows():
 
     # Define the list of tiles to add to the VRT.
     tif_paths = [TIF_DIR / tif_fname for tif_fname in row.values]
-    assert len(tif_paths) == 6
+    assert len(tif_paths) == 9
 
     # Build the VRT.
     if not vrt_path.exists():
