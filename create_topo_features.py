@@ -19,9 +19,8 @@ import whitebox
 
 # ---- Local imports.
 from hdml import __datadir__ as datadir
-from hdml.gishelpers import get_dem_filepaths
 from hdml.tiling import (
-    generate_tiles_bbox, extract_tile, crop_tile, mosaic_tiles, filter_tiles)
+    generate_tiles_bbox, extract_tile, crop_tile, filter_tiles)
 from hdml.topo import (
     dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist,
     height_above_nearest_drainage, height_below_nearest_ridge, ratio_stream,
@@ -259,20 +258,3 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
 
     if tile_count == 25:
         break
-
-# %% Mosaicing
-
-MOSAIC_OUTDIR = datadir / 'training'
-
-for i, name in enumerate(FEATURES[:1]):
-    print(f"[{i+1:02d}] Mosaicing {name} tiles...")
-    mosaic_path = MOSAIC_OUTDIR / f'{name}.vrt'
-    if mosaic_path.exists() and OVERWRITE is False:
-        continue
-
-    mosaic_tiles(
-        tile_paths=get_dem_filepaths(TILES_CROPPED_DIR / name),
-        output_raster=mosaic_path,
-        overwrite=False,
-        cleanup_tiles=False
-        )
