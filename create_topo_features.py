@@ -78,17 +78,17 @@ wbt = whitebox.WhiteboxTools()
 wbt.verbose = False
 
 tile_count = 0
-total_tiles = len(tiles_bbox_data)
-for tile_key, tile_bbox_data in tiles_bbox_data.items():
+total_tiles = len(tiles_gdf)
+for tile_key, tile_bbox_data in tiles_gdf.iterrows():
     ty, tx = tile_key
     tile_count += 1
     progress = f"[{tile_count:02d}/{total_tiles}]"
 
     crop_kwargs = {
-        'crop_x_offset': tile_bbox_data['crop_x_offset'],
-        'crop_y_offset': tile_bbox_data['crop_y_offset'],
-        'width': tile_bbox_data['core'][2],
-        'height': tile_bbox_data['core'][3],
+        'crop_x_offset': tile_bbox_data.crop_x_offset,
+        'crop_y_offset': tile_bbox_data.crop_y_offset,
+        'width': tile_bbox_data.core_bbox_pixels[2],
+        'height': tile_bbox_data.core_bbox_pixels[3],
         'overwrite': False
         }
 
@@ -121,8 +121,9 @@ for tile_key, tile_bbox_data in tiles_bbox_data.items():
             'func': lambda output, **kwargs: extract_tile(
                 output_tile=output, **kwargs),
             'kwargs': {'input_raster': vrt_reprojected,
-                       'bbox': tile_bbox_data['overlap'],
-                       'overwrite': OVERWRITE}
+                       'bbox': tile_bbox_data.ovlp_bbox_pixels,
+                       'overwrite': OVERWRITE,
+                       'output_dtype': 'Float32'}
             },
         'filled_dem': {
             'func': wbt.fill_depressions,
