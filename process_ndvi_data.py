@@ -24,6 +24,7 @@ from osgeo import gdal
 import pandas as pd
 import geopandas as gpd
 import numpy as np
+import rasterio
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
@@ -36,7 +37,7 @@ MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07', 'h20v07',
 
 NDVI_DIR = datadir / 'ndvi'
 
-HDF_DIR = Path("F:/MODIS NDVI 250m")
+HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS NDVI 250m")
 HDF_DIR.mkdir(parents=True, exist_ok=True)
 
 TIF_DIR = NDVI_DIR / 'tiles'
@@ -127,10 +128,11 @@ for hdf_name, url in hdf_names.items():
             hdf_fpath, 0, tif_fpath)
     else:
         print(f'{progress} Fetching MODIS HDF metadata...')
-        hdf_metadata = get_MOD13Q1_hdf_metadata(hdf_fpath)
-        date_start = hdf_metadata['RANGEBEGINNINGDATE']
-        date_end = hdf_metadata['RANGEENDINGDATE']
-        tile_name = hdf_metadata['tile_name']
+        with rasterio.open(tif_fpath) as src:
+            meta_dict = src.tags()
+            tile_name = meta_dict.get('tile_name')
+            date_start = meta_dict.get('date_start')
+            date_end = meta_dict.get('date_end')
 
     index_df.loc[(date_start, date_end), tile_name] = tif_fpath.name
     i += 1
