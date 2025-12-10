@@ -28,6 +28,82 @@ gwl_gdf = gwl_gdf.set_index("ID", drop=True)
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 
+# Extract coordinates of WTD obs as list of (x, y) tuples.
+coords = [(geom.x, geom.y) for geom in gwl_gdf.geometry]
+
+tiles_gdf = gpd.read_file(datadir / "topo" / "tiles_geom_training.gpkg")
+
+joined = gpd.sjoin(
+    gwl_gdf, tiles_gdf[['tile_index', 'geometry']],
+    how='left', predicate='within'
+    )
+joined = joined.drop(columns=['index_right'])
+
+# %%
+
+input_dir = datadir / 'topo' / 'tiles (cropped)'
+
+for tile_idx, group in joined.groupby('tile_index'):
+    print(f"Tile Index: {tile_idx}")
+    print(len(group))
+
+    coords = [(geom.x, geom.y) for geom in group.geometry]
+
+    import ast
+    ty, tx = ast.literal_eval(tile_idx)
+
+    names = [
+        'ratio_dist', 'ratio_stream',
+        'dist_stream', 'alt_stream',
+        'dist_top', 'alt_top'
+        ]
+
+    for name in names:
+        tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+        tif_path = input_dir / name / tile_name
+
+        with rasterio.open(tif_path) as src:
+            values = np.array(list(src.sample(coords)))
+            values[values == src.nodata] = np.nan
+
+        gwl_gdf.loc[group.index, name] = values[:, 0]
+
+    stat_index_map = {
+        'min': 0,
+        'max': 1,
+        'mean': 2,
+        'var': 3,
+        'skew': 4,
+        'kurt': 5
+        }
+
+    name_stat = {
+        'long_hessian': ['max', 'mean', 'var', 'skew', 'kurt'],
+        'long_grad': ['mean', 'var'],
+        'short_grad': ['max', 'var', 'mean'],
+        'stream_grad': ['max', 'var', 'mean'],
+        'stream_hessian': ['max']
+        }
+
+    for name, stats in name_stat.items():
+        tile_name = f'{name}_stats_tile_{ty:03d}_{tx:03d}.tif'
+        tif_path = input_dir / f'{name}_stats' / tile_name
+
+        with rasterio.open(tif_path) as src:
+            values = np.array(list(src.sample(coords)))
+            values[values == src.nodata] = np.nan
+
+        for stat in stats:
+            index = stat_index_map[stat]
+            gwl_gdf.loc[group.index, f'{name}_{stat}'] = values[:, index]
+
+    break
+
+
+# %%
+
+# Add precip and ndvi avg sub-basin values for each water level observation.
+
 ndvi_daily = pd.read_csv(
     datadir / 'ndvi' / 'ndvi_vrt_index.csv',
     index_col=0, parse_dates=True, dtype={'file': str}
@@ -38,11 +114,14 @@ precip_daily = pd.read_csv(
     index_col=0, parse_dates=True, dtype={'file': str}
     )
 
-# Extract coordinates of WTD obs as list of (x, y) tuples.
-coords = [(geom.x, geom.y) for geom in gwl_gdf.geometry]
+for index, row in gwl_gdf.iterrows():
+    date_range = pd.date_range(row.climdata_date_start, row.DATE)
+    basin_id = str(int(row.HYBAS_ID))
 
+    # Add mean daily NDVI values (at the basin scale).
+    ndvi_values = ndvi_daily.loc[date_range, basin_id]
+    gwl_gdf.loc[index, 'ndvi'] = np.mean(ndvi_values)
 
-# gwl_gdf["ground_elev"] = ground_elev
-# gwl_gdf["gwl_elev"] = gwl_gdf["ground_elev"] - gwl_gdf['NS']
-
-# gwl_gdf.to_file(datadir / 'training' / "gwl_obs_all.geojson", driver="GeoJSON")
+    # Add mean daily PRECIP values (at the basin scale).
+    precip_values = precip_daily.loc[date_range, basin_id]
+    gwl_gdf.loc[index, 'precipitation'] = np.mean(precip_values)
