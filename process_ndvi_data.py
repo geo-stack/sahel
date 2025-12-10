@@ -31,12 +31,12 @@ from hdml.ed_helpers import (
     earthaccess_login, MOD13Q1_hdf_to_geotiff, get_MOD13Q1_hdf_metadata)
 from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
-MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07',
+MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07', 'h20v07',
                     'h16v08', 'h17v08', 'h18v08', 'h19v08']
 
 NDVI_DIR = datadir / 'ndvi'
 
-HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS NDVI 250m")
+HDF_DIR = Path("F:/MODIS NDVI 250m")
 HDF_DIR.mkdir(parents=True, exist_ok=True)
 
 TIF_DIR = NDVI_DIR / 'tiles'
@@ -61,18 +61,22 @@ print("Authenticating with NASA Earthdata...")
 earthaccess = earthaccess_login()
 
 # Get the list of available hDF names from the NDVI MODIS dataset.
-print("Getting the list of MODIS datasets from earthdata (this might take a "
-      "few minutes)...")
 
-granules = earthaccess.search_data(
-    short_name="MOD13Q1",
-    version="061",
-    cloud_hosted=False,
+all_granules = []
+for tile in MODIS_TILE_NAMES:
+    print(f"Searching for tile {tile}...")
+    granules = earthaccess.search_data(
+        short_name="MOD13Q1",
+        version="061",
+        cloud_hosted=False,
+        granule_name=f"*{tile}*"  # Wildcard pattern to match tile name
     )
+    all_granules.extend(granules)
+    print(f"  Found {len(granules)} granules for {tile}")
 
 
-avail_hdf_names = {}
-for granule in granules:
+hdf_names = {}
+for granule in all_granules:
     tile_id = granule['meta']['native-id']
     for url_data in granule['umm']['RelatedUrls']:
         url = url_data['URL']
@@ -81,16 +85,8 @@ for granule in granules:
     else:
         raise ValueError("Cannot find a URL ending with '.hdf'.")
 
-    avail_hdf_names[tile_id] = url
+    hdf_names[tile_id] = url
 
-
-# Only keep the hdf for the tiles listed in MODIS_TILE_NAMES.
-hdf_names = {}
-for avail_hdf_name in avail_hdf_names.keys():
-    for tile_name in MODIS_TILE_NAMES:
-        if tile_name in avail_hdf_name:
-            hdf_names[avail_hdf_name] = avail_hdf_names[avail_hdf_name]
-            break
 
 # %%
 
@@ -130,6 +126,7 @@ for hdf_name, url in hdf_names.items():
         tile_name, date_start, date_end = MOD13Q1_hdf_to_geotiff(
             hdf_fpath, 0, tif_fpath)
     else:
+        print(f'{progress} Fetching MODIS HDF metadata...')
         hdf_metadata = get_MOD13Q1_hdf_metadata(hdf_fpath)
         date_start = hdf_metadata['RANGEBEGINNINGDATE']
         date_end = hdf_metadata['RANGEENDINGDATE']
@@ -137,8 +134,6 @@ for hdf_name, url in hdf_names.items():
 
     index_df.loc[(date_start, date_end), tile_name] = tif_fpath.name
     i += 1
-
-    break
 
 index_df.to_csv(index_fpath)
 
