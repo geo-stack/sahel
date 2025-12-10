@@ -254,6 +254,9 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
     print(f"{progress} All topo feature for tile {tile_key} computed "
           f"in {round(ttot1 - ttot0):0.0f} sec")
 
+    shutil.rmtree(TILES_OVERLAP_DIR)
+    TILES_OVERLAP_DIR.mkdir(parents=True, exist_ok=True)
+
     if tile_count == 25:
         break
 
