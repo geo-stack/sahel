@@ -17,7 +17,7 @@ import numpy as np
 from numba import njit
 
 
-@njit(cache=True)
+@njit(cache=True, fastmath=True)
 def bresenham_line(row0: int, col0: int, row1: int, col1: int) -> np.ndarray:
     """
     Generate coordinates of pixels along a line using Bresenham's algorithm.
@@ -111,7 +111,7 @@ def bresenham_line(row0: int, col0: int, row1: int, col1: int) -> np.ndarray:
     return points
 
 
-@njit(cache=True)
+@njit(cache=True, fastmath=True)
 def precompute_spiral_offsets(size: int) -> np.ndarray:
     """
     Precompute offsets for a size × size grid.

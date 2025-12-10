@@ -22,7 +22,7 @@ from skimage.morphology import skeletonize, remove_small_objects
 
 # ---- Local imports
 from hdml.math import bresenham_line, precompute_spiral_offsets
-from hdml.localfilters import local_stats_numba, downslope_stats_numba
+from hdml.localfilters import local_stats_numba, downslope_stats_numba, NODATA
 
 
 def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
@@ -811,28 +811,20 @@ def stream_stats(
         (stream_cols != dist_stream_nodata)
         )
 
-    # Replace nodata by np.nan values
-    data[~valid_pixels] = np. nan
+    # Make sure we use the nodata values expected in numba functions
+    data[~valid_pixels] = NODATA
 
     results = downslope_stats_numba(data, stream_rows, stream_cols, fisher)
     assert results.shape[0] == 6
     assert results.shape[1] == height
     assert results.shape[2] == width
 
-    # Preserve the 'nodata' mask in the input raster.
-    results[:, ~valid_pixels] = nodata
-
-    # Replace any remaining 'nan' value by the 'nodata' value.
-    isnan = np.isnan(results)
-    if np.sum(isnan):
-        results[isnan] = nodata
-
     out_profile = profile.copy()
     out_profile.update(
         dtype=rasterio.float32,
         compress='deflate',
         count=6,
-        nodata=nodata
+        nodata=NODATA
         )
 
     with rasterio.open(output, 'w', **out_profile) as dst:

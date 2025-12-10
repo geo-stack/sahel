@@ -17,16 +17,21 @@ from numba import njit, prange
 # ---- Local imports
 from hdml.math import bresenham_line
 
+# IMPORTANT NOTE: When using @njit with 'fastmath=True', 'np.isnan'
+# does not work, so we expect nan values to be '-32768'.
+NODATA = -32768
+
 
 # ---- Filter functions
 @njit(parallel=True, fastmath=True)
 def downslope_stats_numba(grid, stream_rows, stream_cols, fisher=False):
+
     nr, nc = grid.shape
 
     results = np.empty((6, nr, nc), dtype=np.float32)
     for i in prange(nr):
         for j in range(nc):
-            if not np.isnan(grid[i, j]):
+            if grid[i, j] != NODATA:
 
                 line_pts = bresenham_line(
                     i, j, stream_rows[i, j], stream_cols[i, j]
@@ -50,7 +55,7 @@ def downslope_stats_numba(grid, stream_rows, stream_cols, fisher=False):
                 results[4, i, j] = skew_v
                 results[5, i, j] = kurt_v
             else:
-                results[:, i, j] = np.nan
+                results[:, i, j] = NODATA
 
     return results
 
@@ -87,13 +92,13 @@ def local_stats_numba(grid, window, fisher=False):
     nr, nc = grid.shape
     half_win = window // 2
 
-    results = np.full((6, nr, nc), np.nan, dtype=np.float32)
+    results = np.full((6, nr, nc), NODATA, dtype=np.float32)
 
     for i in prange(nr):
         i_min = max(0, i - half_win)
         i_max = min(nr, i + half_win + 1)
         for j in range(nc):
-            if not np.isnan(grid[i, j]):
+            if grid[i, j] != NODATA:
                 j_min = max(0, j - half_win)
                 j_max = min(nc, j + half_win + 1)
 
@@ -109,12 +114,12 @@ def local_stats_numba(grid, window, fisher=False):
                 results[4, i, j] = skew_v
                 results[5, i, j] = kurt_v
             else:
-                results[:, i, j] = np.nan
+                results[:, i, j] = NODATA
 
     return results
 
 
-@njit()
+@njit(fastmath=True)
 def window_stats_numba(arr, fisher=False):
     """
     Calculate comprehensive statistics for a 2D array window.
@@ -138,7 +143,7 @@ def window_stats_numba(arr, fisher=False):
     """
     nr, nc = arr.shape
     if nr * nc < 4:
-        return np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+        return NODATA, NODATA, NODATA, NODATA, NODATA, NODATA
 
     # First pass: calculate mean, min, max.
     mean_val = 0.0
@@ -147,7 +152,7 @@ def window_stats_numba(arr, fisher=False):
     count = 0
     for i in range(nr):
         for j in range(nc):
-            if not np.isnan(arr[i, j]):
+            if arr[i, j] != NODATA:
                 val = arr[i, j]
                 mean_val += val
                 if val < min_val:
@@ -157,7 +162,7 @@ def window_stats_numba(arr, fisher=False):
                 count += 1
 
     if count < 4:
-        return np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+        return NODATA, NODATA, NODATA, NODATA, NODATA, NODATA
 
     mean_val /= count
 
@@ -179,8 +184,8 @@ def window_stats_numba(arr, fisher=False):
     m4 /= count
 
     if var == 0.0:
-        skew = np.nan
-        kurt = np.nan
+        skew = NODATA
+        kurt = NODATA
     else:
         # Calculate skewness
         skew = m3 / (var ** 1.5)
