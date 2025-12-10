@@ -11,6 +11,7 @@
 
 # ---- Standard imports.
 from time import perf_counter
+import shutil
 
 # ---- Third party imports.
 import geopandas as gpd
@@ -114,10 +115,18 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
 
         return overlap_tile_path
 
+    all_processed = True
     tile_paths = {}
     for name in FEATURES:
         tile_name = tile_name_template.format(name=name, ty=ty, tx=tx)
         tile_paths[name] = TILES_OVERLAP_DIR / name / tile_name
+
+        if not(TILES_CROPPED_DIR / name / tile_name).exists():
+            all_processed = False
+
+    if all_processed is True:
+        print(f"{progress} Features already calculated for tile {tile_key}.")
+        continue
 
     func_kwargs = {
         'dem': {
@@ -232,6 +241,7 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
     # max_short_distance = 7 pixels == 210 m -> halfwidth de 105 m
     # max_long_distance = 41 = 1230 m -> halfwidth = 615 m
 
+    ttot0 = perf_counter()
     for name in FEATURES:
         t0 = perf_counter()
         print(f"{progress} Computing {name} for tile {tile_key}...", end='')
@@ -240,8 +250,11 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
         process_feature(name, func, **kwargs)
         t1 = perf_counter()
         print(f' done in {round(t1 - t0):0.0f} sec')
+    ttot1 = perf_counter()
+    print(f"{progress} All topo feature for tile {tile_key} computed "
+          f"in {round(ttot1 - ttot0):0.0f} sec")
 
-    if tile_count == 1:
+    if tile_count == 25:
         break
 
 # %% Mosaicing
