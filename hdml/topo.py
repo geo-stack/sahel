@@ -725,7 +725,7 @@ def local_stats(raster: Path, window: int, output: Path,
     # Make sure window is an uneven number.
     window = window + (1 - window % 2)
 
-    results = local_stats_numba(data, window=window)
+    results = local_stats_numba(data, window=window, fisher=fisher)
     assert results.shape[0] == 6
     assert results.shape[1] == height
     assert results.shape[2] == width
@@ -742,7 +742,8 @@ def local_stats(raster: Path, window: int, output: Path,
     out_profile.update(
         dtype=rasterio.float32,
         compress='deflate',
-        count=6
+        count=6,
+        nodata=nodata
         )
     with rasterio.open(output, 'w', **out_profile) as dst:
         for i in range(6):
@@ -802,7 +803,8 @@ def stream_stats(
         stream_cols = src.read(3).astype(int)
         dist_stream_nodata = int(src.nodata)
 
-    # Expand nodata mask to include pixels with invalid stream indices.
+    # Identify valid pixels:  must have valid raster data AND valid
+    # stream indices
     valid_pixels = (
         (data != nodata) &
         (stream_rows != dist_stream_nodata) &

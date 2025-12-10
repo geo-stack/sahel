@@ -140,8 +140,6 @@ def window_stats_numba(arr, fisher=False):
     if nr * nc < 4:
         return np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
 
-    nr, nc = arr.shape
-
     # First pass: calculate mean, min, max.
     mean_val = 0.0
     min_val = np.inf
