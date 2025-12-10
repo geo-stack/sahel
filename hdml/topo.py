@@ -635,7 +635,7 @@ def ratio_stream(dem: Path, hand: Path, dist_stream: Path, output: Path):
         dem_profile = src.profile
         dem_data = src.read(1)
         dem_nodata = src.nodata
-        nodata_mask = (dem_data == dem_nodata)
+
         dem_width = src.width
         dem_height = src.height
 
@@ -646,20 +646,33 @@ def ratio_stream(dem: Path, hand: Path, dist_stream: Path, output: Path):
     with rasterio.open(hand) as src:
         assert dem_transform == src.transform
         hand_data = src.read(1)
+        hand_nodata = src.nodata
 
     with rasterio.open(dist_stream) as src:
         assert dem_transform == src.transform
-        dist_stream_data = np.maximum(src.read(1), pixel_size)
+        dist_stream_data = src.read(1)
+        dist_stream_nodata = src.nodata
 
+    valid_pixels = (
+        (dem_data != dem_nodata) &
+        (hand_data != hand_nodata) &
+        (dist_stream_data != dist_stream_nodata)
+        )
+
+    # Calculate ratio with minimum threshold to avoid division by zero.
+    # Stream pixels (distance = 0) and very small distances are clamped to
+    # pixel_size to prevent numerical instability.
     ratio_stream = np.full(
         (dem_height, dem_width), dem_nodata, dtype=np.float32
         )
-    ratio_stream[~nodata_mask] = (
-        hand_data[~nodata_mask] / dist_stream_data[~nodata_mask]
+    ratio_stream[valid_pixels] = (
+        hand_data[valid_pixels] /
+        np.maximum(dist_stream_data[valid_pixels], pixel_size)
         )
 
+    # Write output.
     out_profile = dem_profile.copy()
-    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    out_profile.update(dtype=rasterio.float32, compress='deflate', count=1)
     with rasterio.open(output, 'w', **out_profile) as dst:
         dst.write(ratio_stream, 1)
 
@@ -689,7 +702,7 @@ def local_stats(raster: Path, window: int, output: Path,
         profile = src.profile
         data = np.asarray(src.read(1), dtype='float32')
 
-        nodata = src.nodata
+        nodata = float(src.nodata)
         nodata_mask = (data == nodata)
 
         width = src.width
