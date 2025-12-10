@@ -228,7 +228,8 @@ def extract_tile(
         input_raster: Path,
         output_tile: Path,
         bbox: list,
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dtype: str = None
         ) -> Path:
     """
     Extract a tile from a raster using pixel coordinates.
@@ -243,6 +244,10 @@ def extract_tile(
         Bounding box as [x_start, y_start, width, height] in pixel coordinates.
     overwrite : bool, optional
         Whether to overwrite existing output. Default is False.
+    output_dtype : str, optional
+        Output GDAL data type. If None, keeps the source data type.
+        Supported dtypes: 'Byte', 'UInt16', 'UInt32', 'Int16', 'Int32',
+        'Float32', 'Float64'.
 
     Returns
     -------
@@ -250,11 +255,16 @@ def extract_tile(
         Path to the extracted tile.
     """
     if not osp.exists(output_tile) or overwrite:
+        kwargs = dict(
+            srcWin=bbox,
+            creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
+            )
+        if output_dtype is not None:
+            kwargs["outputType"] = getattr(gdal, f"GDT_{output_dtype}")
         gdal.Translate(
             str(output_tile),
             str(input_raster),
-            srcWin=bbox,
-            creationOptions=['COMPRESS=DEFLATE', 'TILED=YES']
+            **kwargs
             )
 
     return output_tile
