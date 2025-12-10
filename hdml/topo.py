@@ -313,10 +313,10 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
         - Band 2: Row index of nearest stream pixel (float32)
         - Band 3: Column index of nearest stream pixel (float32)
     """
-
     with rasterio.open(dem) as src:
         dem_profile = src.profile.copy()
         dem_data = src.read(1)
+
         dem_nodata = src.nodata
         nodata_mask = (dem_data == dem_nodata)
 
@@ -346,7 +346,7 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
     nearest_rows = indices[0]
     nearest_cols = indices[1]
 
-    # Set nodata value where dem is null.
+    # Apply nodata mask to all output bands
     distances[nodata_mask] = dem_nodata
     nearest_rows[nodata_mask] = dem_nodata
     nearest_cols[nodata_mask] = dem_nodata
@@ -763,12 +763,36 @@ def stream_stats(
         output: Path,
         fisher: bool = False
         ):
+    """
+    Calculate statistical summaries along flow paths from each pixel to its
+    nearest stream.
+
+    For each valid pixel, computes descriptive statistics (min, max, mean,
+    variance, skewness, kurtosis) along the Bresenham line connecting it to
+    its nearest stream pixel. Results are saved as a 6-band raster.
+
+    Statistics are computed along straight-line paths (Bresenham algorithm),
+    not flow-routed paths.
+
+    raster : Path
+        Path to input raster (e.g., DEM, slope, or other terrain attribute).
+    dist_stream : Path
+        Path to 3-band raster from `dist_to_streams()` containing distance
+        to nearest stream (band 1), stream row index (band 2), and stream
+        column index (band 3).
+    output : Path
+        Output path for 6-band GeoTIFF with statistics:
+        Band 1: minimum, Band 2: maximum, Band 3: mean,
+        Band 4: variance, Band 5: skewness, Band 6: kurtosis.
+    fisher : bool, optional
+        If True, compute Fisher's excess kurtosis (kurtosis - 3).
+        If False, compute Pearson's kurtosis.  Default is False.
+    """
+
     with rasterio.open(raster) as src:
         profile = src.profile
         data = np.asarray(src.read(1), dtype='float32')
-
         nodata = src.nodata
-        nodata_mask = (data == nodata)
 
         width = src.width
         height = src.height
@@ -776,17 +800,25 @@ def stream_stats(
     with rasterio.open(dist_stream) as src:
         stream_rows = src.read(2).astype(int)
         stream_cols = src.read(3).astype(int)
+        dist_stream_nodata = int(src.nodata)
 
-    # Replace nodata by np.nan values.
-    data[nodata_mask] = np.nan
+    # Expand nodata mask to include pixels with invalid stream indices.
+    valid_pixels = (
+        (data != nodata) &
+        (stream_rows != dist_stream_nodata) &
+        (stream_cols != dist_stream_nodata)
+        )
 
-    results = downslope_stats_numba(data, stream_rows, stream_cols)
+    # Replace nodata by np.nan values
+    data[~valid_pixels] = np. nan
+
+    results = downslope_stats_numba(data, stream_rows, stream_cols, fisher)
     assert results.shape[0] == 6
     assert results.shape[1] == height
     assert results.shape[2] == width
 
     # Preserve the 'nodata' mask in the input raster.
-    results[:, nodata_mask] = nodata
+    results[:, ~valid_pixels] = nodata
 
     # Replace any remaining 'nan' value by the 'nodata' value.
     isnan = np.isnan(results)
@@ -797,8 +829,10 @@ def stream_stats(
     out_profile.update(
         dtype=rasterio.float32,
         compress='deflate',
-        count=6
+        count=6,
+        nodata=nodata
         )
+
     with rasterio.open(output, 'w', **out_profile) as dst:
         for i in range(6):
             dst.write(results[i, :, :], i + 1)
