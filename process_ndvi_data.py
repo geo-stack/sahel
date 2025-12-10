@@ -227,13 +227,21 @@ zonal_index_map, bad_basin_ids = build_zonal_index_map(
 ntot = len(vrt_fnames)
 count = 0
 for vrt_name in vrt_fnames:
-    print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
-    vrt_path = VRT_DIR / vrt_name
+    mask_index = vrt_index.file == vrt_name
 
-    mean_ndvi, basin_ids = extract_zonal_means(vrt_path, zonal_index_map)
+    if not np.any(pd.isnull(vrt_index.loc[mask_index])):
+        print(f"[{count+1:02d}/{ntot}] Skipping "
+              f"already processed {vrt_name}...")
+
+        count += 1
+        continue
+
+    print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
+
+    mean_ndvi, basin_ids = extract_zonal_means(
+        VRT_DIR / vrt_name, zonal_index_map)
     mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
 
-    mask_index = vrt_index.file == vrt_name
     for i, basin_id in enumerate(basins_gdf.index):
         vrt_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
 
