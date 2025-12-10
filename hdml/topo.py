@@ -496,7 +496,7 @@ def height_above_nearest_drainage(dem: Path, dist_stream: Path, output: Path):
         dem_profile = src.profile
         dem_data = src.read(1)
         dem_nodata = src.nodata
-        nodata_mask = (dem_data == dem_nodata)
+
         dem_width = src.width
         dem_height = src.height
 
@@ -504,20 +504,31 @@ def height_above_nearest_drainage(dem: Path, dist_stream: Path, output: Path):
 
     with rasterio.open(dist_stream) as src:
         assert dem_transform == src.transform
-        stream_rows = src.read(2).astype(int)[~nodata_mask]
-        stream_cols = src.read(3).astype(int)[~nodata_mask]
+        stream_rows = src.read(2).astype(int)
+        stream_cols = src.read(3).astype(int)
+        dist_stream_nodata = int(src.nodata)
 
-    hans = np.full(
+    # Valid where both DEM and projected stream are not nodata
+    valid_pixels = (
+        (dem_data != dem_nodata) &
+        (stream_rows != dist_stream_nodata) &
+        (stream_cols != dist_stream_nodata)
+        )
+
+    # Compute where valid.
+    hand = np.full(
         (dem_height, dem_width), dem_nodata, dtype=np.float32
         )
-    hans[~nodata_mask] = (
-        dem_data[~nodata_mask] - dem_data[stream_rows, stream_cols]
+    hand[valid_pixels] = (
+        dem_data[valid_pixels] -
+        dem_data[stream_rows[valid_pixels], stream_cols[valid_pixels]]
         )
 
+    # Write output.
     out_profile = dem_profile.copy()
-    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    out_profile.update(dtype=rasterio.float32, compress='deflate', count=1)
     with rasterio.open(output, 'w', **out_profile) as dst:
-        dst.write(hans, 1)
+        dst.write(hand, 1)
 
 
 def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
