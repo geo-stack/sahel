@@ -719,8 +719,8 @@ def local_stats(raster: Path, window: int, output: Path,
         width = src.width
         height = src.height
 
-    # Replace nodata by np.nan values.
-    data[nodata_mask] = np.nan
+    # Make sure we use the nodata values expected in numba functions.
+    data[nodata_mask] = NODATA
 
     # Make sure window is an uneven number.
     window = window + (1 - window % 2)
@@ -731,19 +731,15 @@ def local_stats(raster: Path, window: int, output: Path,
     assert results.shape[2] == width
 
     # Preserve the 'nodata' mask in the input raster.
-    results[:, nodata_mask] = nodata
+    results[:, nodata_mask] = NODATA
 
     # Replace any remaining 'nan' value by the 'nodata' value.
-    isnan = np.isnan(results)
-    if np.sum(isnan):
-        results[isnan] = nodata
-
     out_profile = profile.copy()
     out_profile.update(
         dtype=rasterio.float32,
         compress='deflate',
         count=6,
-        nodata=nodata
+        nodata=NODATA
         )
     with rasterio.open(output, 'w', **out_profile) as dst:
         for i in range(6):
