@@ -526,26 +526,24 @@ def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
     a DEM and save the results.
 
     For each valid pixel in a digital elevation model (DEM), computes the
-    height below the nearest ridge . The height below ridges is calculated
-    as the elevation difference between the DEM pixel and the elevation of
-    the nearest ridge. The result is saved as a raster file.
+    height below the nearest ridge by subtracting the DEM value at each pixel
+    from the DEM value at its nearest ridge pixel (as given by dist_ridge).
+
+    Pixels are set to nodata if either the input DEM or nearest ridge indices
+    are nodata.
 
     Parameters
     ----------
     dem : Path
-        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
-        raster dataset.
+        Path to the input DEM file (GeoTIFF).
     dist_ridge : Path
-        Path to the raster file containing distances to the nearest ridge,
-        along with the ridge pixel coordinates.
+        Path to a raster with 3 bands:
+        - Band 1: Distance to nearest ridge
+        - Band 2: Row index of nearest ridge pixel
+        - Band 3: Column index of nearest ridge pixel
     output : Path
-        Path where the output raster file containing the height differences
-        will be saved.
-
-    Output
-    ------
-    - A raster file saved to the `output` path containing the computed height
-      differences below the nearest ridge as a float32 raster.
+        Output path for the float32 GeoTIFF containing height below
+        nearest ridge.
 
     Notes
     -----
@@ -559,26 +557,36 @@ def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
         dem_profile = src.profile
         dem_data = src.read(1)
         dem_nodata = src.nodata
-        nodata_mask = (dem_data == dem_nodata)
+        dem_transform = src.transform
+
         dem_width = src.width
         dem_height = src.height
 
-        dem_transform = src.transform
-
     with rasterio.open(dist_ridge) as src:
         assert dem_transform == src.transform
-        ridge_rows = src.read(2).astype(int)[~nodata_mask]
-        ridge_cols = src.read(3).astype(int)[~nodata_mask]
+        ridge_rows = src.read(2).astype(int)
+        ridge_cols = src.read(3).astype(int)
+        ridge_nodata = int(src.nodata)
 
+    # Valid where both DEM and projected ridge are not nodata
+    valid_pixels = (
+        (dem_data != dem_nodata) &
+        (ridge_rows != ridge_nodata) &
+        (ridge_cols != ridge_nodata)
+        )
+
+    # Compute where valid.
     hbnr = np.full(
         (dem_height, dem_width), dem_nodata, dtype=np.float32
         )
-    hbnr[~nodata_mask] = (
-        dem_data[ridge_rows, ridge_cols] - dem_data[~nodata_mask]
+    hbnr[valid_pixels] = (
+        dem_data[ridge_rows[valid_pixels], ridge_cols[valid_pixels]] -
+        dem_data[valid_pixels]
         )
 
+    # Write output.
     out_profile = dem_profile.copy()
-    out_profile.update(dtype=rasterio.float32, compress='deflate')
+    out_profile.update(dtype=rasterio.float32, compress='deflate', count=1)
     with rasterio.open(output, 'w', **out_profile) as dst:
         dst.write(hbnr, 1)
 
