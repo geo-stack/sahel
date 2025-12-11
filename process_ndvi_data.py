@@ -6,7 +6,7 @@
 # The World Bank Group and is licensed under the terms of the MIT license.
 #
 # For inquiries, contact: info@geostack.ca
-# Repository: https://github.com/geo-stack/sahel
+# Repository: https://github.com/geo-stack/hydrodepthml
 # =============================================================================
 
 # MODIS NDVI (MOD13A1) data from NASA EarthData is only available since the
@@ -234,6 +234,7 @@ zonal_index_map, bad_basin_ids = build_zonal_index_map(
 ntot = len(mosaic_fnames)
 count = 0
 for mosaic_name in mosaic_fnames:
+    t0 = perf_counter()
     mask_index = mosaic_index.file == mosaic_name
 
     if not np.any(pd.isnull(mosaic_index.loc[mask_index])):
@@ -243,7 +244,7 @@ for mosaic_name in mosaic_fnames:
         count += 1
         continue
 
-    print(f"[{count+1:02d}/{ntot}] Processing {mosaic_name}...")
+    print(f"[{count+1:02d}/{ntot}] Processing {mosaic_name}...", end=' ')
 
     mean_ndvi, basin_ids = extract_zonal_means(
         MOSAIC_DIR / mosaic_name, zonal_index_map)
@@ -253,6 +254,8 @@ for mosaic_name in mosaic_fnames:
         mosaic_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
 
     count += 1
+    t1 = perf_counter()
+    print(f'done in {t1 - t0:0.1f} sec')
 
     if count > 350:
         break

@@ -6,7 +6,7 @@
 # The World Bank Group and is licensed under the terms of the MIT license.
 #
 # For inquiries, contact: info@geostack.ca
-# Repository: https://github.com/geo-stack/sahel_water_table_ml
+# Repository: https://github.com/geo-stack/hydrodepthml
 # =============================================================================
 
 """Zonal data and stats extraction capability."""
