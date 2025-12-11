@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 # ---- Third party imports
+import pandas as pd
 import geopandas as gpd
 from sklearn.model_selection import (
     RandomizedSearchCV, LeaveOneGroupOut, GridSearchCV)
@@ -26,7 +27,7 @@ import xgboost as xgb
 from hdml import __datadir__ as datadir
 
 
-gwl_gdf = gpd.read_file(datadir / "wtd_obs_training_dataset.csv")
+gwl_df = pd.read_csv(datadir / "wtd_obs_training_dataset.csv")
 
 
 varlist = [
@@ -50,27 +51,30 @@ varlist = [
     'stream_grad_var',
     'stream_grad_mean',
     'stream_hessian_max',
-    # 'ndvi',
-    # 'precipitation'
+    'ndvi',
+    'precipitation'
     ]
-
-
-xgb_model = xgb.XGBRegressor(random_state=42)
-logo = LeaveOneGroupOut()
 
 labels = ['ID', 'NS', 'country', 'geometry']
 labels += varlist
 
-predicdf = gwl_gdf[labels].copy()
-predicdf = gwl_gdf.dropna()
+# %%
 
-X = predicdf.loc[:, varlist].values
-y = predicdf.loc[:, 'NS']
-groups = predicdf['country'].values
+# Perform model cross-validation using the countries to split the dataset.
+import numpy as np
+from hdml.modeling import perform_cross_validation, plot_pred_vs_obs
+
+
+df = gwl_df.copy()
+df = gwl_df.dropna()
+df = df[df.country == 'Mali']
+
 
 # %%
 
 # Hyperparameter optimization (RandomizedSearchCV).
+
+xgb_model = xgb.XGBRegressor(random_state=42)
 
 params_grid = {
     'n_estimators': [100, 300, 500, 700, 900],
@@ -88,30 +92,35 @@ random_search = RandomizedSearchCV(
     param_distributions=params_grid,
     n_iter=100,
     scoring='neg_mean_squared_error',
-    cv=logo,
+    # cv=LeaveOneGroupOut(),
     verbose=2,
     random_state=42,
     n_jobs=-1
     )
 
-random_search.fit(X, y, groups=groups)
+X = df[varlist].values
+y = df['NS'].values
+random_search.fit(X, y)
+
+best_params = random_search.best_params_
 
 print()
-print("Meilleurs hyperparamètres trouvés :")
-print(random_search.best_params_)
-
+print("Best hyperparamter found :")
+print(best_params)
 
 # %%
 
+# Hyperparameter optimization (GridSearchCV).
+
 params_grid = {
-    'n_estimators': [850, 900, 950],
-    'max_depth': [5, 6, 7],
-    'learning_rate': [0.04, 0.05, 0.06],
-    'subsample': [0.6],
-    'colsample_bytree': [0.6],
-    'gamma': [1],
-    'reg_alpha': [0.75, 1, 1.25],
-    'reg_lambda': [1.75, 2, 2.25]
+    'n_estimators': [75, 100, 125],
+    'max_depth': [8, 9, 10],
+    'learning_rate': [0.05, 0.01, 0.02],
+    'subsample': [0.5, 0.6, 0.7],
+    'colsample_bytree': [0.6, 0.7, 0.8],
+    'gamma': [0.25, 0.5, 0.75],
+    'reg_alpha': [1.75, 2, 2.25],
+    'reg_lambda': [1.25, 1.5, 1.75]
     }
 
 
@@ -119,25 +128,67 @@ grid_search = GridSearchCV(
     estimator=xgb_model,
     param_grid=params_grid,
     scoring='neg_mean_squared_error',
-    cv=logo,
+    # cv=LeaveOneGroupOut(),
     verbose=2,
     n_jobs=-1
     )
 
-grid_search.fit(X, y, groups=groups)
+grid_search.fit(X, y)
+
+best_params = random_search.best_params_
 
 print()
-print("Meilleurs hyperparamètres trouvés :")
-print(grid_search.best_params_)
+print("Best hyperparamter found :")
+print(best_params)
 
-# Best params:
-# model_kwargs = {
-#     'colsample_bytree': 0.6,
-#     'gamma': 1,
-#     'learning_rate': 0.04,
-#     'max_depth': 7,
-#     'n_estimators': 950,
-#     'reg_alpha': 0.75,
-#     'reg_lambda': 2,
-#     'subsample': 0.6
-#     }
+
+# %%
+
+train_index = df[df.LON < -6.2].index
+test_index = df[df.LON >= -6.2].index
+
+X_train = df.loc[train_index, varlist].values
+y_train = df.loc[train_index, 'NS'].values
+
+X_test = df.loc[test_index, varlist].values
+y_test = df.loc[test_index, 'NS'].values
+
+Cl = xgb.XGBRegressor(random_state=42, **best_params)
+Cl.fit(X_train, y_train)
+y_eval = Cl.predict(X_test)
+
+importances = {
+    varlist[f]: Cl.feature_importances_[f] for
+    f in range(X.shape[1])
+    }
+
+classes = ['Mali'] * len(y_test)
+axis = {'xmin': 0, 'xmax': 30, 'ymin': 0, 'ymax': 30}
+fig = plot_pred_vs_obs(
+    y_test, y_train, classes, axis,
+    suptitle='True vs Predicted values',
+    plot_stats=True
+    )
+
+# predicdf, importances_avg = perform_cross_validation(
+#     gwl_df, varlist=varlist,
+#     regressor='xgboost',
+#     model_kwargs=model_kwargs,
+#     scale_data=False)
+
+# xobs = traindf.NS.values
+# xpred = predicdf.NS.values
+# classes = traindf.country.values
+
+# max_val = max(np.max(xobs), np.max(xpred))
+
+# axis = {'xmin': 0, 'xmax': 90, 'ymin': 0, 'ymax': 90}
+
+# fig = plot_pred_vs_obs(
+#     xobs, xpred, classes, axis,
+#     suptitle=None,
+#     axtitle=None, varlist=None,
+#     importances=None, colors=None,
+#     plot_stats=True, highlight_label=None,
+#     highlight_mask=None, zorders=None
+#     )
