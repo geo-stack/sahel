@@ -106,8 +106,10 @@ gwl_gdf.to_csv(datadir / "wtd_obs_training_dataset.csv")
 
 # Add precip and ndvi avg sub-basin values for each water level observation.
 
+print("Adding NDVI and precipitation data to training dataset...")
+
 ndvi_daily = pd.read_csv(
-    datadir / 'ndvi' / 'ndvi_vrt_index.csv',
+    datadir / 'ndvi' / 'ndvi_mosaic_index.csv',
     index_col=0, parse_dates=True, dtype={'file': str}
     )
 

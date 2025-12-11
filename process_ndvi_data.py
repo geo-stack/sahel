@@ -257,7 +257,4 @@ for mosaic_name in mosaic_fnames:
     t1 = perf_counter()
     print(f'done in {t1 - t0:0.1f} sec')
 
-    if count > 350:
-        break
-
 mosaic_index.to_csv(mosaic_index_path)
