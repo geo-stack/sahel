@@ -6,7 +6,7 @@
 # The World Bank Group and is licensed under the terms of the MIT license.
 #
 # For inquiries, contact: info@geostack.ca
-# Repository: https://github.com/geo-stack/sahel
+# Repository: https://github.com/geo-stack/hydrodepthml
 # =============================================================================
 
 # ---- Standard imports
@@ -16,14 +16,12 @@ import numpy as np
 import rasterio
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
 
 
 gwl_gdf = gpd.read_file(datadir / "data" / "wtd_obs_all.gpkg")
-gwl_gdf = gwl_gdf.set_index("ID", drop=True)
 
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
@@ -43,9 +41,10 @@ joined = joined.drop(columns=['index_right'])
 
 input_dir = datadir / 'topo' / 'tiles (cropped)'
 
+ntot = len(np.unique(joined.tile_index))
+count = 1
 for tile_idx, group in joined.groupby('tile_index'):
-    print(f"Tile Index: {tile_idx}")
-    print(len(group))
+    print(f"[{count}/{ntot}] Processing tile index: {tile_idx}...")
 
     coords = [(geom.x, geom.y) for geom in group.geometry]
 
@@ -97,7 +96,10 @@ for tile_idx, group in joined.groupby('tile_index'):
             index = stat_index_map[stat]
             gwl_gdf.loc[group.index, f'{name}_{stat}'] = values[:, index]
 
-    break
+    count += 1
+
+gwl_gdf.to_file(datadir / "wtd_obs_training_dataset.gpkg", driver="GPKG")
+gwl_gdf.to_csv(datadir / "wtd_obs_training_dataset.csv")
 
 
 # %%
@@ -125,3 +127,6 @@ for index, row in gwl_gdf.iterrows():
     # Add mean daily PRECIP values (at the basin scale).
     precip_values = precip_daily.loc[date_range, basin_id]
     gwl_gdf.loc[index, 'precipitation'] = np.mean(precip_values)
+
+gwl_gdf.to_file(datadir / "wtd_obs_training_dataset.gpkg", driver="GPKG")
+gwl_gdf.to_csv(datadir / "wtd_obs_training_dataset.csv")
