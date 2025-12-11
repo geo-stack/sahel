@@ -6,15 +6,13 @@
 # The World Bank Group and is licensed under the terms of the MIT license.
 #
 # For inquiries, contact: info@geostack.ca
-# Repository: https://github.com/geo-stack/sahel
+# Repository: https://github.com/geo-stack/hydrodepthml
 # =============================================================================
 
 # ---- Standard imports.
 from time import perf_counter
-import shutil
 
 # ---- Third party imports.
-import geopandas as gpd
 import whitebox
 
 # ---- Local imports.
@@ -252,9 +250,3 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
     ttot1 = perf_counter()
     print(f"{progress} All topo feature for tile {tile_key} computed "
           f"in {round(ttot1 - ttot0):0.0f} sec")
-
-    shutil.rmtree(TILES_OVERLAP_DIR)
-    TILES_OVERLAP_DIR.mkdir(parents=True, exist_ok=True)
-
-    if tile_count == 25:
-        break
