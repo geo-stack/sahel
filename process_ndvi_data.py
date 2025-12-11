@@ -17,7 +17,7 @@
 
 # ---- Standard imports
 from pathlib import Path
-import shutil
+from time import perf_counter
 
 # ---- Third party imports
 from osgeo import gdal
@@ -28,8 +28,7 @@ import rasterio
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
-from hdml.ed_helpers import (
-    earthaccess_login, MOD13Q1_hdf_to_geotiff, get_MOD13Q1_hdf_metadata)
+from hdml.ed_helpers import earthaccess_login, MOD13Q1_hdf_to_geotiff
 from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
 MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07', 'h20v07',
@@ -37,17 +36,17 @@ MODIS_TILE_NAMES = ['h16v07', 'h17v07', 'h18v07', 'h19v07', 'h20v07',
 
 NDVI_DIR = datadir / 'ndvi'
 
-HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS NDVI 250m")
-HDF_DIR.mkdir(parents=True, exist_ok=True)
+HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS MOD13Q1 HDF 250m")
+TIF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS NDVI TIF 250m")
 
-TIF_DIR = NDVI_DIR / 'tiles'
-TIF_DIR.mkdir(parents=True, exist_ok=True)
+MOSAIC_DIR = NDVI_DIR / 'mosaic'
+MOSAIC_DIR.mkdir(parents=True, exist_ok=True)
 
 VRT_DIR = NDVI_DIR / 'vrt'
 VRT_DIR.mkdir(parents=True, exist_ok=True)
 
 tif_file_index_path = datadir / "ndvi" / "ndvi_tiles_index.csv"
-vrt_index_path = datadir / 'ndvi' / 'ndvi_vrt_index.csv'
+mosaic_index_path = datadir / 'ndvi' / 'ndvi_mosaic_index.csv'
 
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
@@ -141,24 +140,26 @@ index_df.to_csv(tif_file_index_path)
 
 # %%
 
-# Generate GDAL virtual raster (VRT).
+# Generate the tiled GeoTIFF mosaic.
 
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
-if not vrt_index_path.exists():
-    vrt_index = pd.DataFrame(
+if not mosaic_index_path.exists():
+    mosaic_index = pd.DataFrame(
         columns=['file'] + list(basins_gdf.index.astype(str)),
         index=pd.date_range('2000-01-01', '2025-12-31')
         )
 else:
-    vrt_index = pd.read_csv(
-        vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+    mosaic_index = pd.read_csv(
+        mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
         )
+
 
 ntot = len(tif_file_index)
 i = 0
 for index, row in tif_file_index.iterrows():
-    print(f"[{i+1:02d}/{ntot}] Producing VRT for {index[0]}...")
+    t0 = perf_counter()
+    print(f"[{i+1:02d}/{ntot}] Producing a mosaic for {index[0]}...", end=' ')
 
     # Define the name of the VRT file.
     start = index[0].replace('-', '')
@@ -169,27 +170,28 @@ for index, row in tif_file_index.iterrows():
     tif_paths = [TIF_DIR / tif_fname for tif_fname in row.values]
     assert len(tif_paths) == 9
 
-    # Build the VRT.
+    # Build a VRT first.
     if not vrt_path.exists():
         ds = gdal.BuildVRT(vrt_path, tif_paths)
         ds.FlushCache()
         del ds
 
-    # Reprojected VRT.
-    dst_crs = 'ESRI:102022'  # Africa Albers Equal Area Conic
-
-    vrt_reprojected = VRT_DIR / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.vrt"
-
-    if not vrt_reprojected.exists():
+    # Reprojected and assemble the tiles into a mosaic.
+    mosaic_path = MOSAIC_DIR / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.tif"
+    if not mosaic_path.exists():
         warp_options = gdal.WarpOptions(
-            dstSRS='ESRI:102022',
-            format='VRT',
+            dstSRS='ESRI:102022',  # Africa Albers Equal Area Conic
+            format='GTiff',
             resampleAlg='bilinear',
-            multithread=True,
+            creationOptions=[
+                'COMPRESS=DEFLATE',
+                'TILED=YES',
+                'BIGTIFF=YES'
+                ]
             )
 
         ds_reproj = gdal.Warp(
-            str(vrt_reprojected),
+            str(mosaic_path),
             str(vrt_path),
             options=warp_options
             )
@@ -197,54 +199,62 @@ for index, row in tif_file_index.iterrows():
         del ds_reproj
 
     # Update the VRT file index.
-    vrt_index.loc[pd.date_range(*index), 'file'] = vrt_reprojected.name
-    i += 1
+    mosaic_index.loc[pd.date_range(*index), 'file'] = mosaic_path.name
 
-vrt_index.to_csv(vrt_index_path)
+    i += 1
+    t1 = perf_counter()
+    print(f'done in {t1 - t0:0.1f} sec')
+
+mosaic_index.to_csv(mosaic_index_path)
 
 # %%
 
 # Generate the basin zonal index map.
 
-vrt_index = pd.read_csv(
-    vrt_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+mosaic_index = pd.read_csv(
+    mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
     )
 
 basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 basins_gdf.index = basins_gdf.index.astype(int)
 
-vrt_fnames = vrt_index.file
-vrt_fnames = vrt_fnames[~pd.isnull(vrt_fnames)]
-vrt_fnames = np.unique(vrt_fnames)
+mosaic_fnames = mosaic_index.file
+mosaic_fnames = mosaic_fnames[~pd.isnull(mosaic_fnames)]
+mosaic_fnames = np.unique(mosaic_fnames)
 
 zonal_index_map, bad_basin_ids = build_zonal_index_map(
-    VRT_DIR / vrt_fnames[0], basins_gdf
+    MOSAIC_DIR / mosaic_fnames[0], basins_gdf
     )
+
+# %%
 
 # Extract NDVI means for each basin.
 
-ntot = len(vrt_fnames)
+ntot = len(mosaic_fnames)
 count = 0
-for vrt_name in vrt_fnames:
-    mask_index = vrt_index.file == vrt_name
+for mosaic_name in mosaic_fnames:
+    mask_index = mosaic_index.file == mosaic_name
 
-    if not np.any(pd.isnull(vrt_index.loc[mask_index])):
+    if not np.any(pd.isnull(mosaic_index.loc[mask_index])):
         print(f"[{count+1:02d}/{ntot}] Skipping "
-              f"already processed {vrt_name}...")
+              f"already processed {mosaic_name}...")
 
         count += 1
         continue
 
-    print(f"[{count+1:02d}/{ntot}] Processing {vrt_name}...")
+    print(f"[{count+1:02d}/{ntot}] Processing {mosaic_name}...")
 
     mean_ndvi, basin_ids = extract_zonal_means(
-        VRT_DIR / vrt_name, zonal_index_map)
+        MOSAIC_DIR / mosaic_name, zonal_index_map)
     mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
 
     for i, basin_id in enumerate(basins_gdf.index):
-        vrt_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
+        mosaic_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
 
     count += 1
 
-vrt_index.to_csv(vrt_index_path)
+    if count > 350:
+        break
+
+mosaic_index.to_csv(mosaic_index_path)
