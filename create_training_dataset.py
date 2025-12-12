@@ -53,7 +53,6 @@ for tile_idx, group in joined.groupby('tile_index'):
 
     names = [
         'smoothed_dem',
-        'ratio_stream',
         'dist_stream',
         'alt_stream',
         'dist_top',
@@ -106,6 +105,10 @@ pixel_size = 30
 gwl_gdf['ratio_dist'] = (
     gwl_gdf['dist_stream'] / (np.maximum(gwl_gdf['dist_top'], pixel_size))
     )
+gwl_gdf['ratio_stream'] = (
+    gwl_gdf['alt_stream'] / np.maximum(gwl_gdf['dist_stream'], pixel_size)
+    )
+
 
 gwl_gdf.to_file(datadir / "wtd_obs_training_dataset.gpkg", driver="GPKG")
 gwl_gdf.to_csv(datadir / "wtd_obs_training_dataset.csv")

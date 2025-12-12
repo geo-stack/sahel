@@ -10,6 +10,7 @@
 # =============================================================================
 
 # ---- Standard imports.
+from pathlib import Path
 from time import perf_counter
 
 # ---- Third party imports.
@@ -20,21 +21,23 @@ import whitebox
 from hdml import __datadir__ as datadir
 from hdml.tiling import extract_tile, crop_tile
 from hdml.topo import (
-    dist_to_streams, extract_ridges, dist_to_ridges, ratio_dist,
-    height_above_nearest_drainage, height_below_nearest_ridge, ratio_stream,
+    dist_to_streams, extract_ridges, dist_to_ridges,
+    height_above_nearest_drainage, height_below_nearest_ridge,
     local_stats, stream_stats)
 
 
 OVERWRITE = False
 
 TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (overlapped)'
-TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (cropped)'
+TILES_CROPPED_DIR = Path(
+    "E:/Banque Mondiale (HydroDepthML)/tiles (overlapped)"
+    )
 
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
             'slope', 'curvature', 'dist_stream', 'ridges',
             'dist_top', 'alt_stream', 'alt_top',
-            'ratio_stream', 'long_hessian_stats', 'long_grad_stats',
+            'long_hessian_stats', 'long_grad_stats',
             'short_grad_stats', 'stream_grad_stats', 'stream_hessian_stats']
 
 vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
@@ -162,12 +165,6 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
             'func': height_below_nearest_ridge,
             'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'dist_ridge': tile_paths['dist_top']}
-            },
-        'ratio_stream': {
-            'func': ratio_stream,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
-                       'hand': tile_paths['alt_stream'],
-                       'dist_stream': tile_paths['dist_stream']}
             },
         'long_hessian_stats': {
             'func': local_stats,
