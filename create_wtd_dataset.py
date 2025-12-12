@@ -19,6 +19,7 @@ import geopandas as gpd
 # ---- Local imports
 from hdml import __datadir__ as datadir
 from hdml.wtd_helpers import create_wtd_obs_dataset
+from hdml.tiling import generate_tiles_bbox, filter_tiles
 
 
 def recharge_period_from_basin_area(area_km2: float) -> int:
@@ -114,3 +115,39 @@ basins_gdf = basins_gdf['geometry']
 
 
 basins_gdf.to_file(datadir / "data" / "wtd_basin_geometry.gpkg", driver="GPKG")
+
+
+# %% Tiling
+
+vrt_reprojected = datadir / 'dem' / 'nasadem_102022.vrt'
+
+# Tiles for the whole African continent bbox.
+tiles_gdf_all = generate_tiles_bbox(
+    input_raster=vrt_reprojected,
+    tile_size=5000,    # in pixels
+    overlap=100 * 30,  # 100 pixels at 30 meters resolution
+    )
+
+output_path = datadir / "topo" / "tiles_geom_all.gpkg"
+if not output_path.exists():
+    tiles_gdf_all.to_file(output_path, driver="GPKG")
+
+# Tiles clipped to the African continent geometry.
+tiles_gdf_africa = filter_tiles(
+    datadir / 'coastline' / 'africa_landmass.gpkg',
+    tiles_gdf_all
+    )
+
+output_path = datadir / "topo" / "tiles_geom_africa.gpkg"
+if not output_path.exists():
+    tiles_gdf_africa.to_file(output_path, driver="GPKG")
+
+# Tiles that contains water level observations.
+tiles_gdf = filter_tiles(
+    datadir / 'data' / 'wtd_obs_all.gpkg',
+    tiles_gdf_all
+    )
+
+output_path = datadir / "topo" / "tiles_geom_training.gpkg"
+if not output_path.exists():
+    tiles_gdf.to_file(output_path, driver="GPKG")
