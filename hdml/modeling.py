@@ -158,7 +158,7 @@ def plot_pred_vs_obs(
     if plot_stats:
         transform = ax.transAxes + ScaledTranslation(
             hshift, vshift, fig.dpi_scale_trans)
-        ax.text(0, 1, 'ME [W/m/K] :',
+        ax.text(0, 1, 'ME [m] :',
                 transform=transform, va='top', ha='left', fontweight='bold',
                 fontsize=9, zorder=1000)
 
@@ -179,7 +179,7 @@ def plot_pred_vs_obs(
 
         transform = ax.transAxes + ScaledTranslation(
             hshift, vshift, fig.dpi_scale_trans)
-        ax.text(0, 1, 'RMSE [W/m/K] :',
+        ax.text(0, 1, 'RMSE [m] :',
                 transform=transform, va='top', ha='left', fontweight='bold',
                 fontsize=9, zorder=1000)
 
