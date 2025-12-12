@@ -33,7 +33,7 @@ TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (cropped)'
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
             'slope', 'curvature', 'dist_stream', 'ridges',
-            'dist_top', 'ratio_dist', 'alt_stream', 'alt_top',
+            'dist_top', 'alt_stream', 'alt_top',
             'ratio_stream', 'long_hessian_stats', 'long_grad_stats',
             'short_grad_stats', 'stream_grad_stats', 'stream_hessian_stats']
 
@@ -152,12 +152,6 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
             'kwargs': {'dem': tile_paths['smoothed_dem'],
                        'streams': tile_paths['streams'],
                        'ridges': tile_paths['ridges']}
-            },
-        'ratio_dist': {
-            'func': ratio_dist,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
-                       'dist_stream': tile_paths['dist_stream'],
-                       'dist_ridge': tile_paths['dist_top']}
             },
         'alt_stream': {
             'func': height_above_nearest_drainage,
