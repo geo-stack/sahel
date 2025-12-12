@@ -91,17 +91,17 @@ for index, row in gwl_gdf.iterrows():
     gwl_gdf.loc[index, 'climdata_date_start'] = date_start
 
 
-# We filter out measurements that are before 2000 and after 2025.
-year_min = 2000
+# We filter out measurements that are before 2003 and after 2025.
+year_min = 2002
 year_max = 2025
-mask = ((gwl_gdf.climdata_date_start.dt.year < year_min) |
-        (gwl_gdf.DATE.dt.year > year_max))
-gwl_gdf = gwl_gdf[~mask]
+mask = ((gwl_gdf.climdata_date_start.dt.year > year_min) &
+        (gwl_gdf.DATE.dt.year < year_max))
+gwl_gdf = gwl_gdf[mask]
 
 original_count = len(mask)
 removed_count = np.sum(mask)
-print(f"Removed {removed_count} points (from {original_count}) for which "
-      f"daily climatic data are needed before {2000} or after {year_max}.")
+print(f"Removed {removed_count} points (from {original_count}) that "
+      f"were before {year_min + 1} or after {year_max - 1}.")
 print(f'Final dataset has {len(gwl_gdf)} points.')
 
 # Save the water table observations dataset.
