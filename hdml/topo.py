@@ -13,9 +13,9 @@ from typing import Any, Callable
 # ---- Standard imports
 import ast
 from pathlib import Path
+from time import perf_counter
 
 # ---- Third party imports
-import geopandas as gpd
 import pandas as pd
 from numba import njit, prange
 import numpy as np
@@ -713,10 +713,16 @@ def stream_stats(
 
 def generate_topo_features_for_tile(
         tile_bbox_data: pd.Series,
+        dem_path: str | Path,
         crop_tile_dir: str | Path,
         ovlp_tile_dir: str | Path,
         print_affix: str = None,
-        overwrite: bool = False
+        extract_streams_treshold: int = 1500,
+        gaussian_filter_sigma: int = 1,
+        ridge_size: int = 30,
+        long_stats_window: int = 41,
+        short_stats_window: int = 7,
+        overwrite: bool = False,
         ):
     """
     Generate all topo-derived features for the ML model for the
@@ -789,7 +795,7 @@ def generate_topo_features_for_tile(
         'dem': {
             'func': lambda output, **kwargs: extract_tile(
                 output_tile=output, **kwargs),
-            'kwargs': {'input_raster': dem_reproj_path,
+            'kwargs': {'input_raster': dem_path,
                        'bbox': ovlp_bbox_pixels,
                        'overwrite': overwrite,
                        'output_dtype': 'Float32'}
@@ -811,7 +817,7 @@ def generate_topo_features_for_tile(
         'streams': {
             'func': wbt.extract_streams,
             'kwargs': {'flow_accum': tile_paths['flow_accum'],
-                       'threshold': 1500}
+                       'threshold': extract_streams_treshold}
             },
         'geomorphons': {
             'func': wbt.geomorphons,
@@ -840,7 +846,7 @@ def generate_topo_features_for_tile(
         'ridges': {
             'func': extract_ridges,
             'kwargs': {'geomorphons': tile_paths['geomorphons'],
-                       'ridge_size': 30,
+                       'ridge_size': ridge_size,
                        'flow_acc': tile_paths['flow_accum'],
                        'max_flow_acc': 2}
 
@@ -864,17 +870,17 @@ def generate_topo_features_for_tile(
         'long_hessian_stats': {
             'func': local_stats,
             'kwargs': {'raster': tile_paths['curvature'],
-                       'window': 41}
+                       'window': long_stats_window}
             },
         'long_grad_stats': {
             'func': local_stats,
             'kwargs': {'raster': tile_paths['slope'],
-                       'window': 41}
+                       'window': long_stats_window}
             },
         'short_grad_stats': {
             'func': local_stats,
             'kwargs': {'raster': tile_paths['slope'],
-                       'window': 7}
+                       'window': short_stats_window}
             },
         'stream_grad_stats': {
             'func': stream_stats,
