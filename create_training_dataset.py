@@ -52,7 +52,6 @@ for tile_idx, group in joined.groupby('tile_index'):
     ty, tx = ast.literal_eval(tile_idx)
 
     names = [
-        'smoothed_dem',
         'dist_stream',
         'alt_stream',
         'dist_top',

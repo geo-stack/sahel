@@ -11,18 +11,24 @@
 from typing import Any, Callable
 
 # ---- Standard imports
+import ast
 from pathlib import Path
 
 # ---- Third party imports
+import geopandas as gpd
+import pandas as pd
 from numba import njit, prange
 import numpy as np
 import rasterio
 from scipy.ndimage import distance_transform_edt
 from skimage.morphology import skeletonize, remove_small_objects
+import whitebox
 
 # ---- Local imports
+from hdml import __datadir__ as datadir
 from hdml.math import bresenham_line, precompute_spiral_offsets
 from hdml.localfilters import local_stats_numba, downslope_stats_numba, NODATA
+from hdml.tiling import extract_tile, crop_tile
 
 
 def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
@@ -703,6 +709,203 @@ def stream_stats(
         dst.set_band_description(4, 'var')
         dst.set_band_description(5, 'skew')
         dst.set_band_description(6, 'kurt')
+
+
+def generate_topo_features_for_tile(
+        tile_bbox_data: pd.Series,
+        crop_tile_dir: str | Path,
+        ovlp_tile_dir: str | Path,
+        print_affix: str = None,
+        overwrite: bool = False
+        ):
+    """
+    Generate all topo-derived features for the ML model for the
+    specified tile.
+    """
+    if print_affix != '':
+        print_affix += ' '
+
+    dem_reproj_path = datadir / 'dem' / 'nasadem_102022.vrt'
+
+    tile_index = tile_bbox_data.tile_index
+    ty, tx = ast.literal_eval(tile_index)
+
+    FEATURES = ['dem', 'dem_smooth', 'dem_cond',
+                'flow_accum', 'streams', 'geomorphons',
+                'slope', 'curvature', 'dist_stream', 'ridges',
+                'dist_top', 'alt_stream', 'alt_top',
+                'long_hessian_stats', 'long_grad_stats',
+                'short_grad_stats', 'stream_grad_stats',
+                'stream_hessian_stats']
+
+    wbt = whitebox.WhiteboxTools()
+    wbt.verbose = False
+
+    core_bbox_pixels = ast.literal_eval(tile_bbox_data.core_bbox_pixels)
+    ovlp_bbox_pixels = ast.literal_eval(tile_bbox_data.ovlp_bbox_pixels)
+
+    crop_kwargs = {
+        'crop_x_offset': tile_bbox_data.crop_x_offset,
+        'crop_y_offset': tile_bbox_data.crop_y_offset,
+        'width': core_bbox_pixels[2],
+        'height': core_bbox_pixels[3],
+        'overwrite': False
+        }
+
+    tile_name_template = '{name}_tile_{ty:03d}_{tx:03d}.tif'
+
+    # Helper to process a feature.
+    def process_feature(name, func, **kwargs):
+        tile_name = tile_name_template.format(name=name, ty=ty, tx=tx)
+
+        overlap_tile_path = ovlp_tile_dir / name / tile_name
+        overlap_tile_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not overlap_tile_path.exists() or overwrite:
+            func(output=str(overlap_tile_path), **kwargs)
+
+            cropped_tile_path = crop_tile_dir / name / tile_name
+            cropped_tile_path.parent.mkdir(parents=True, exist_ok=True)
+
+            crop_tile(overlap_tile_path, cropped_tile_path, **crop_kwargs)
+
+        return overlap_tile_path
+
+    all_processed = True
+    tile_paths = {}
+    for name in FEATURES:
+        tile_name = tile_name_template.format(name=name, ty=ty, tx=tx)
+        tile_paths[name] = ovlp_tile_dir / name / tile_name
+
+        if not(crop_tile_dir / name / tile_name).exists():
+            all_processed = False
+
+    if all_processed is True:
+        print(f"{print_affix}Features already calculated "
+              f"for tile {tile_index}.")
+        return
+
+    func_kwargs = {
+        'dem': {
+            'func': lambda output, **kwargs: extract_tile(
+                output_tile=output, **kwargs),
+            'kwargs': {'input_raster': dem_reproj_path,
+                       'bbox': ovlp_bbox_pixels,
+                       'overwrite': overwrite,
+                       'output_dtype': 'Float32'}
+            },
+        'dem_smooth': {
+            'func': wbt.gaussian_filter,
+            'kwargs': {'i': tile_paths['dem'],
+                       'sigma': 1.0}
+            },
+        'dem_cond': {
+            'func': wbt.fill_depressions,
+            'kwargs': {'dem': tile_paths['dem_smooth']}
+            },
+        'flow_accum': {
+            'func': wbt.d8_flow_accumulation,
+            'kwargs': {'i': tile_paths['dem_cond'],
+                       'out_type': 'cells'}
+            },
+        'streams': {
+            'func': wbt.extract_streams,
+            'kwargs': {'flow_accum': tile_paths['flow_accum'],
+                       'threshold': 1500}
+            },
+        'geomorphons': {
+            'func': wbt.geomorphons,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'search': 100,
+                       'threshold': 1.0,
+                       'fdist': 0,
+                       'skip': 0,
+                       'forms': True,
+                       'residuals': True
+                       }
+            },
+        'slope': {
+            'func': wbt.slope,
+            'kwargs': {'dem': tile_paths['dem_cond']}
+            },
+        'curvature': {
+            'func': wbt.profile_curvature,
+            'kwargs': {'dem': tile_paths['dem_cond']}
+            },
+        'dist_stream': {
+            'func': dist_to_streams,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'streams': tile_paths['streams']}
+            },
+        'ridges': {
+            'func': extract_ridges,
+            'kwargs': {'geomorphons': tile_paths['geomorphons'],
+                       'ridge_size': 30,
+                       'flow_acc': tile_paths['flow_accum'],
+                       'max_flow_acc': 2}
+
+            },
+        'dist_top': {
+            'func': dist_to_ridges,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'streams': tile_paths['streams'],
+                       'ridges': tile_paths['ridges']}
+            },
+        'alt_stream': {
+            'func': height_above_nearest_drainage,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'dist_stream': tile_paths['dist_stream']}
+            },
+        'alt_top': {
+            'func': height_below_nearest_ridge,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'dist_ridge': tile_paths['dist_top']}
+            },
+        'long_hessian_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['curvature'],
+                       'window': 41}
+            },
+        'long_grad_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'window': 41}
+            },
+        'short_grad_stats': {
+            'func': local_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'window': 7}
+            },
+        'stream_grad_stats': {
+            'func': stream_stats,
+            'kwargs': {'raster': tile_paths['slope'],
+                       'dist_stream': tile_paths['dist_stream'],
+                       'fisher': False}
+            },
+        'stream_hessian_stats': {
+            'func': stream_stats,
+            'kwargs': {'raster': tile_paths['curvature'],
+                       'dist_stream': tile_paths['dist_stream'],
+                       'fisher': False}
+            },
+        }
+
+    # max_short_distance = 7 pixels == 210 m -> halfwidth de 105 m
+    # max_long_distance = 41 = 1230 m -> halfwidth = 615 m
+
+    ttot0 = perf_counter()
+    for name in FEATURES:
+        t0 = perf_counter()
+        print(f"{print_affix}Computing {name} for tile {tile_index}...",
+              end='')
+        func = func_kwargs[name]['func']
+        kwargs = func_kwargs[name]['kwargs']
+        process_feature(name, func, **kwargs)
+        t1 = perf_counter()
+        print(f' done in {round(t1 - t0):0.0f} sec')
+    ttot1 = perf_counter()
+    print(f"{print_affix} All topo feature for tile {tile_index} "
+          f"computed in {round(ttot1 - ttot0):0.0f} sec")
 
 
 if __name__ == '__main__':
