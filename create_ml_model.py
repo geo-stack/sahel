@@ -10,9 +10,6 @@
 # =============================================================================
 
 # ---- Standard imports
-import os
-import os.path as osp
-import sys
 from pathlib import Path
 
 # ---- Third party imports
@@ -21,8 +18,6 @@ import pandas as pd
 import geopandas as gpd
 from sklearn.model_selection import (
     RandomizedSearchCV, LeaveOneGroupOut, GridSearchCV)
-
-import xgboost as xgb
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
