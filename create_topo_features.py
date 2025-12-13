@@ -32,7 +32,7 @@ OVERWRITE = False
 TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (cropped)'
 TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (overlapped)'
 
-FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
+FEATURES = ['dem', 'dem_smooth', 'dem_cond',
             'flow_accum', 'streams', 'geomorphons',
             'slope', 'curvature', 'dist_stream', 'ridges',
             'dist_top', 'alt_stream', 'alt_top',
@@ -110,18 +110,18 @@ for _, tile_bbox_data in tiles_gdf.iterrows():
                        'overwrite': OVERWRITE,
                        'output_dtype': 'Float32'}
             },
-        'filled_dem': {
-            'func': wbt.fill_depressions,
-            'kwargs': {'dem': tile_paths['dem']}
-            },
-        'smoothed_dem': {
+        'dem_smooth': {
             'func': wbt.gaussian_filter,
-            'kwargs': {'i': tile_paths['filled_dem'],
-                       'sigma': 2.0}
+            'kwargs': {'i': tile_paths['dem'],
+                       'sigma': 1.0}
+            },
+        'dem_cond': {
+            'func': wbt.fill_depressions,
+            'kwargs': {'dem': tile_paths['dem_cond']}
             },
         'flow_accum': {
             'func': wbt.d8_flow_accumulation,
-            'kwargs': {'i': tile_paths['smoothed_dem'],
+            'kwargs': {'i': tile_paths['dem_cond'],
                        'out_type': 'cells'}
             },
         'streams': {
@@ -131,7 +131,7 @@ for _, tile_bbox_data in tiles_gdf.iterrows():
             },
         'geomorphons': {
             'func': wbt.geomorphons,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
+            'kwargs': {'dem': tile_paths['dem_cond'],
                        'search': 100,
                        'threshold': 1.0,
                        'fdist': 0,
@@ -142,15 +142,15 @@ for _, tile_bbox_data in tiles_gdf.iterrows():
             },
         'slope': {
             'func': wbt.slope,
-            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            'kwargs': {'dem': tile_paths['dem_cond']}
             },
         'curvature': {
             'func': wbt.profile_curvature,
-            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            'kwargs': {'dem': tile_paths['dem_cond']}
             },
         'dist_stream': {
             'func': dist_to_streams,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
+            'kwargs': {'dem': tile_paths['dem_cond'],
                        'streams': tile_paths['streams']}
             },
         'ridges': {
@@ -163,18 +163,18 @@ for _, tile_bbox_data in tiles_gdf.iterrows():
             },
         'dist_top': {
             'func': dist_to_ridges,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
+            'kwargs': {'dem': tile_paths['dem_cond'],
                        'streams': tile_paths['streams'],
                        'ridges': tile_paths['ridges']}
             },
         'alt_stream': {
             'func': height_above_nearest_drainage,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
+            'kwargs': {'dem': tile_paths['dem_cond'],
                        'dist_stream': tile_paths['dist_stream']}
             },
         'alt_top': {
             'func': height_below_nearest_ridge,
-            'kwargs': {'dem': tile_paths['smoothed_dem'],
+            'kwargs': {'dem': tile_paths['dem_cond'],
                        'dist_ridge': tile_paths['dist_top']}
             },
         'long_hessian_stats': {
