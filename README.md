@@ -1,6 +1,6 @@
 ## Project Overview
 
-This project aims to leverage geospatial (GIS) and climatic data to develop a tool based on machine learning model to assess the static depth to water (DTW) in crystalline basement aquifers of Africa. Accurate water table depth predictions are crucial for sustainable water resource management, especially in regions dependent on rainfed agriculture.
+This project aims to leverage geospatial (GIS) and climatic data to develop a tool based on machine learning modeling to assess the static depth to water (DTW) in crystalline basement aquifers of Africa. Accurate water table depth predictions are crucial for sustainable water resource management, especially in regions dependent on rainfed agriculture.
 
 The model is trained using one-time measurements of water table depth in the following countries: Benin, Burkina Faso, Guinea, Mali, Niger, Togo, TChad
 
