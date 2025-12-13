@@ -105,6 +105,11 @@ print(f"Removed {removed_count} points (from {original_count}) that "
       f"were before {year_min + 1} or after {year_max - 1}.")
 print(f'Final dataset has {len(gwl_gdf)} points.')
 
+mask_mali = gwl_gdf.country == 'Mali'
+gwl_gdf = gwl_gdf.loc[mask_mali]
+print("Only keep points that are in Mali.")
+print(f"Final dataset has {len(gwl_gdf)} points.")
+
 # Save the water table observations dataset.
 gwl_gdf.to_file(datadir / "data" / "wtd_obs_all.gpkg", driver="GPKG")
 
@@ -127,27 +132,24 @@ tiles_gdf_all = generate_tiles_bbox(
     tile_size=5000,    # in pixels
     overlap=100 * 30,  # 100 pixels at 30 meters resolution
     )
-
-output_path = datadir / "topo" / "tiles_geom_all.gpkg"
-if not output_path.exists():
-    tiles_gdf_all.to_file(output_path, driver="GPKG")
+tiles_gdf_all.to_file(
+    datadir / "topo" / "tiles_geom_all.gpkg",
+    driver="GPKG")
 
 # Tiles clipped to the African continent geometry.
 tiles_gdf_africa = filter_tiles(
     datadir / 'coastline' / 'africa_landmass.gpkg',
     tiles_gdf_all
     )
-
-output_path = datadir / "topo" / "tiles_geom_africa.gpkg"
-if not output_path.exists():
-    tiles_gdf_africa.to_file(output_path, driver="GPKG")
+tiles_gdf_africa.to_file(
+    datadir / "topo" / "tiles_geom_africa.gpkg",
+    driver="GPKG")
 
 # Tiles that contains water level observations.
 tiles_gdf = filter_tiles(
     datadir / 'data' / 'wtd_obs_all.gpkg',
     tiles_gdf_all
     )
-
-output_path = datadir / "topo" / "tiles_geom_training.gpkg"
-if not output_path.exists():
-    tiles_gdf.to_file(output_path, driver="GPKG")
+tiles_gdf.to_file(
+    datadir / "topo" / "tiles_geom_training.gpkg",
+    driver="GPKG")
