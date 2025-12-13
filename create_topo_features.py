@@ -9,15 +9,16 @@
 # Repository: https://github.com/geo-stack/hydrodepthml
 # =============================================================================
 
-# ---- Standard imports.
+# ---- Standard imports
+import ast
 from pathlib import Path
 from time import perf_counter
 
-# ---- Third party imports.
+# ---- Third party imports
 import geopandas as gpd
 import whitebox
 
-# ---- Local imports.
+# ---- Local imports
 from hdml import __datadir__ as datadir
 from hdml.tiling import extract_tile, crop_tile
 from hdml.topo import (
@@ -28,10 +29,8 @@ from hdml.topo import (
 
 OVERWRITE = False
 
-TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (overlapped)'
-TILES_CROPPED_DIR = Path(
-    "E:/Banque Mondiale (HydroDepthML)/tiles (overlapped)"
-    )
+TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (cropped)'
+TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (overlapped)'
 
 FEATURES = ['dem', 'filled_dem', 'smoothed_dem',
             'flow_accum', 'streams', 'geomorphons',
@@ -52,16 +51,21 @@ wbt.verbose = False
 
 tile_count = 0
 total_tiles = len(tiles_gdf)
-for tile_key, tile_bbox_data in tiles_gdf.iterrows():
-    ty, tx = tile_key
+for _, tile_bbox_data in tiles_gdf.iterrows():
+    tile_index = tile_bbox_data.tile_index
+    ty, tx = ast.literal_eval(tile_index)
+
     tile_count += 1
     progress = f"[{tile_count:02d}/{total_tiles}]"
+
+    core_bbox_pixels = ast.literal_eval(tile_bbox_data.core_bbox_pixels)
+    ovlp_bbox_pixels = ast.literal_eval(tile_bbox_data.ovlp_bbox_pixels)
 
     crop_kwargs = {
         'crop_x_offset': tile_bbox_data.crop_x_offset,
         'crop_y_offset': tile_bbox_data.crop_y_offset,
-        'width': tile_bbox_data.core_bbox_pixels[2],
-        'height': tile_bbox_data.core_bbox_pixels[3],
+        'width': core_bbox_pixels[2],
+        'height': core_bbox_pixels[3],
         'overwrite': False
         }
 
@@ -94,7 +98,7 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
             all_processed = False
 
     if all_processed is True:
-        print(f"{progress} Features already calculated for tile {tile_key}.")
+        print(f"{progress} Features already calculated for tile {tile_index}.")
         continue
 
     func_kwargs = {
@@ -102,7 +106,7 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
             'func': lambda output, **kwargs: extract_tile(
                 output_tile=output, **kwargs),
             'kwargs': {'input_raster': vrt_reprojected,
-                       'bbox': tile_bbox_data.ovlp_bbox_pixels,
+                       'bbox': ovlp_bbox_pixels,
                        'overwrite': OVERWRITE,
                        'output_dtype': 'Float32'}
             },
@@ -113,7 +117,7 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
         'smoothed_dem': {
             'func': wbt.gaussian_filter,
             'kwargs': {'i': tile_paths['filled_dem'],
-                       'sigma': 1.0}
+                       'sigma': 2.0}
             },
         'flow_accum': {
             'func': wbt.d8_flow_accumulation,
@@ -127,7 +131,14 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
             },
         'geomorphons': {
             'func': wbt.geomorphons,
-            'kwargs': {'dem': tile_paths['smoothed_dem']}
+            'kwargs': {'dem': tile_paths['smoothed_dem'],
+                       'search': 100,
+                       'threshold': 1.0,
+                       'fdist': 0,
+                       'skip': 0,
+                       'forms': True,
+                       'residuals': True
+                       }
             },
         'slope': {
             'func': wbt.slope,
@@ -201,12 +212,12 @@ for tile_key, tile_bbox_data in tiles_gdf.iterrows():
     ttot0 = perf_counter()
     for name in FEATURES:
         t0 = perf_counter()
-        print(f"{progress} Computing {name} for tile {tile_key}...", end='')
+        print(f"{progress} Computing {name} for tile {tile_index}...", end='')
         func = func_kwargs[name]['func']
         kwargs = func_kwargs[name]['kwargs']
         process_feature(name, func, **kwargs)
         t1 = perf_counter()
         print(f' done in {round(t1 - t0):0.0f} sec')
     ttot1 = perf_counter()
-    print(f"{progress} All topo feature for tile {tile_key} computed "
+    print(f"{progress} All topo feature for tile {tile_index} computed "
           f"in {round(ttot1 - ttot0):0.0f} sec")
