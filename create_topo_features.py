@@ -39,7 +39,11 @@ for _, tile_bbox_data in tiles_gdf.iterrows():
 
     generate_topo_features_for_tile(
         tile_bbox_data=tile_bbox_data,
+        dem_path=datadir / 'dem' / 'nasadem_102022.vrt',
         crop_tile_dir=TILES_CROPPED_DIR,
         ovlp_tile_dir=TILES_OVERLAP_DIR,
         print_affix=progress,
+        extract_streams_treshold=500,
+        gaussian_filter_sigma=1,
+        ridge_size=30,
         )
