@@ -731,7 +731,25 @@ def generate_topo_features_for_tile(
     if print_affix != '':
         print_affix += ' '
 
-    dem_reproj_path = datadir / 'dem' / 'nasadem_102022.vrt'
+    crop_tile_dir = Path(crop_tile_dir)
+    if not crop_tile_dir.exists():
+        raise FileNotFoundError(f"Directory does not exist: {crop_tile_dir}")
+    if not crop_tile_dir.is_dir():
+        raise NotADirectoryError(f"Not a directory: {crop_tile_dir}")
+
+    ovlp_tile_dir = Path(ovlp_tile_dir)
+    if not ovlp_tile_dir.exists():
+        raise FileNotFoundError(f"Directory does not exist: {ovlp_tile_dir}")
+    if not ovlp_tile_dir.is_dir():
+        raise NotADirectoryError(f"Not a directory: {ovlp_tile_dir}")
+
+    dem_path = Path(dem_path)
+    if not dem_path.exists():
+        raise FileNotFoundError(
+            "The path you provided for 'dem_path' is not valid. "
+            "Check that you provided the right path or "
+            "run 'process_dem_data.py' to produce a valid dem mosaic."
+            )
 
     tile_index = tile_bbox_data.tile_index
     ty, tx = ast.literal_eval(tile_index)
