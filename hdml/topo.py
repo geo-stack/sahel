@@ -14,6 +14,7 @@ from typing import Any, Callable
 import ast
 from pathlib import Path
 from time import perf_counter
+from math import sqrt
 
 # ---- Third party imports
 import pandas as pd
@@ -110,20 +111,18 @@ def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
         dst.write(ridges.astype('int'), 1)
 
 
-def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path,
-                   topological: bool = False):
+def dist_to_ridges(dem: Path, ridges: Path, output: Path,
+                   streams: Path = None):
     """
     Calculate distance to the nearest ridge for each pixel in a DEM.
 
     For each pixel in the input DEM, computes the Euclidean distance to the
-    nearest ridge pixel. When `topological=True`, only ridges that can be
-    reached without crossing a stream pixel are considered valid.
-    When `topological=False`, a simple Euclidean distance to the nearest
-    ridge is computed (ignoring streams).
+    nearest ridge pixel. When a path to a `streams` geotiff is provided,
+    only ridges that can be reached without crossing a stream pixel are
+    considered valid.
 
     Outputs both the distance (in map units/meters) and the coordinates of
-    the nearest ridge pixel for every non-nodata pixel. Nodata areas in the
-    DEM are preserved in all output bands.
+    the nearest ridge pixel for every non-nodata pixel in the provided DEM.
 
     When topological mode is enabled, drainage boundaries are respected:
     for each pixel, only ridges that do not require crossing a stream are
@@ -157,14 +156,13 @@ def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path,
     streams : Path
         Path to the streams raster GeoTIFF. Non-zero values are treated as
         stream pixels. Typically generated using tools like WhiteboxTools
-        'extract_streams'. Must be aligned with the DEM.
+        'extract_streams'. Must be aligned with the DEM. When provided,
+        computes distance to the nearest ridge that can be reached
+        without crossing a stream (topologically constrained), else
+        computes simple Euclidean distance to the nearest ridge,
+        ignoring streams entirely.
     output : Path
         Path for the output 3-band GeoTIFF file.
-    topological : bool, default False
-        If True, computes distance to the nearest ridge that can be reached
-        without crossing a stream (topologically constrained).
-        If False, computes simple Euclidean distance to the nearest ridge,
-        ignoring streams entirely.
 
     Returns
     -------
@@ -184,24 +182,34 @@ def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path,
         assert abs(dem_transform.e) == abs(dem_transform.a)
         pixel_size = abs(dem_transform.e)
 
-    with rasterio.open(streams) as src:
-        streams_data = src.read(1)
-        streams_transform = src.transform
-
     with rasterio.open(ridges) as src:
         ridges_data = src.read(1)
         ridges_transform = src.transform
 
     if not np.any(ridges_data > 0):
         raise ValueError("No ridge pixels found!")
+    assert dem_transform == ridges_transform
 
-    assert dem_transform == ridges_transform == streams_transform
+    if streams is None:
+        # Computes the Euclidean distance to the nearest ridge,
+        # ignoring streams entirely.
+        results = _dist_to_ridge_euclidean(
+            dem_data, ridges_data, dem_nodata, pixel_size
+            )
+    else:
+        # Computes distance to the nearest ridge that can be reached
+        # without crossing a stream (topologically constrained)
+        with rasterio.open(streams) as src:
+            streams_data = src.read(1)
+            streams_transform = src.transform
 
-    results = _dist_to_ridges_numba(
-        dem_data, streams_data, ridges_data,
-        nodata=dem_nodata, pixel_size=pixel_size,
-        topological=topological
-        )
+        assert dem_transform == streams_transform
+
+        results = _dist_to_ridges_topological(
+            dem_data, streams_data, ridges_data,
+            nodata=dem_nodata, pixel_size=pixel_size,
+            topological=True
+            )
 
     # Write output raster with 3 bands (all float32):
     # Band 1: Distance to nearest ridge pixel in meters
@@ -225,8 +233,40 @@ def dist_to_ridges(dem: Path, ridges: Path, streams: Path, output: Path,
         dst.set_band_description(3, 'nearest_ridge_col')
 
 
+def _dist_to_ridge_euclidean(
+        dem_data: np.array,
+        ridges_data: np.ndarray,
+        nodata: Any,
+        pixel_size: float,
+        ):
+
+    ridges_mask = ridges_data > 0
+
+    if not ridges_mask.any():
+        raise ValueError("No ridge pixels found!")
+
+    # Compute distances and indices of nearest ridge pixel.
+    distances, indices = distance_transform_edt(
+        ~ridges_mask,
+        sampling=(pixel_size, pixel_size),
+        return_distances=True,
+        return_indices=True
+        )
+
+    ridge_dist = np.empty((3, *dem_data.shape), dtype=np.float32)
+    ridge_dist[0] = distances
+    ridge_dist[1] = indices[0]  # row index of nearest stream pixel
+    ridge_dist[2] = indices[1]  # col index of nearest stream pixel
+
+    # Enforce nodata values in the DEM.
+    nodata_mask = (dem_data == nodata)
+    ridge_dist[:, nodata_mask] = nodata
+
+    return ridge_dist
+
+
 @njit(parallel=True, fastmath=True)
-def _dist_to_ridges_numba(
+def _dist_to_ridges_topological(
         dem_data: np.ndarray,
         streams_data: np.ndarray,
         ridges_data: np.ndarray,
@@ -234,34 +274,6 @@ def _dist_to_ridges_numba(
         pixel_size: float,
         topological: bool = False
         ) -> np.ndarray:
-    """
-    Compute distance to nearest ridge for each pixel in a DEM.
-
-    Parameters
-    ----------
-    dem_data : np.ndarray
-        2D array of DEM elevation values.
-    streams_data : np.ndarray
-        2D array where non-zero values indicate stream pixels.
-    ridges_data : np.ndarray
-        2D array where non-zero values indicate ridge pixels.
-    nodata : Any
-        Nodata value used in the DEM.
-    pixel_size : float
-        Size of each pixel in map units (meters).
-    topological : bool, default False
-        If True, only ridges reachable without crossing a stream are
-        considered. If False, simple Euclidean distance to the nearest
-        ridge is computed (ignoring streams).
-
-    Returns
-    -------
-    np.ndarray
-        3D array of shape (3, height, width) containing:
-        - [0]: Distance to nearest ridge in meters
-        - [1]: Row index of nearest ridge pixel
-        - [2]: Column index of nearest ridge pixel
-    """
 
     dem_height, dem_width = dem_data.shape
     spiral_offsets = precompute_spiral_offsets(max(dem_width, dem_height))
@@ -295,14 +307,14 @@ def _dist_to_ridges_numba(
                 if not (0 <= col + dc < dem_width):
                     continue
 
-                if ridges_data[row + dr, col + dc] == 0:
+                if ridges_data[row + dr, col + dc] != 1:
                     # Nearest point is not a ridge.
                     continue
 
                 # If doing Euclidean search, or if current point is a stream,
                 # simply keep the closest ridge.
                 if not topological or streams_data[row, col] == 1:
-                    ridge_dist[0, row, col] = (dr**2 + dc**2)**0.5 * pixel_size
+                    ridge_dist[0, row, col] = sqrt(dist_sqrt) * pixel_size
                     ridge_dist[1, row, col] = row + dr
                     ridge_dist[2, row, col] = col + dc
                     break
@@ -872,7 +884,6 @@ def generate_topo_features_for_tile(
         'dist_top': {
             'func': dist_to_ridges,
             'kwargs': {'dem': tile_paths['dem_cond'],
-                       'streams': tile_paths['streams'],
                        'ridges': tile_paths['ridges']}
             },
         'alt_stream': {
