@@ -206,8 +206,8 @@ def nearest_ridge_coords(dem: Path, ridges: Path, output: Path,
             topological=True
             )
 
-    nearest_rows = results[1]
-    nearest_cols = results[2]
+    nearest_rows = results[1].astype(int)
+    nearest_cols = results[2].astype(int)
 
     # x and y coordinates of nearest ridge pixel.
     xs, ys = rasterio.transform.xy(
@@ -650,7 +650,7 @@ def generate_topo_features_for_tile(
     FEATURES = [
         'dem', 'dem_smooth', 'dem_cond', 'slope', 'curvature',
         'flow_accum', 'streams', 'nearest_stream_coords',
-        'geomorphons', 'ridges', 'dist_top',
+        'geomorphons', 'ridges', 'nearest_ridge_coords',
         'long_hessian_stats', 'long_grad_stats',
         'short_grad_stats',
         'stream_grad_stats', 'stream_hessian_stats'
