@@ -111,24 +111,48 @@ def extract_ridges(geomorphons: Path, output: Path, ridge_size: int = 30,
         dst.write(ridges.astype('int'), 1)
 
 
-def dist_to_ridges(dem: Path, ridges: Path, output: Path,
-                   streams: Path = None):
+def nearest_ridge_coords(dem: Path, ridges: Path, output: Path,
+                         streams: Path = None):
     """
-    Calculate distance to the nearest ridge for each pixel in a DEM.
+    Find the (x, y, z) coordinates and (row, col) indices of the nearest
+    ridge pixel for each cell.
 
-    For each pixel in the input DEM, computes the Euclidean distance to the
-    nearest ridge pixel. When a path to a `streams` geotiff is provided,
-    only ridges that can be reached without crossing a stream pixel are
-    considered valid.
+    Parameters
+    ----------
+    dem : Path
+        Path to the Digital Elevation Model (DEM) GeoTIFF. Used for spatial
+        reference, nodata masking, and elevation values. DEM, ridges, and
+        streams rasters must be aligned (same CRS, resolution, and extent).
+    ridges : Path
+        Path to the ridges raster GeoTIFF. Ridge pixels are identified where
+        pixel values are positive (> 0). Can be produced by the
+        'extract_ridges' function. Must be aligned with the DEM.
+    streams : Path, optional
+        Path to the streams raster GeoTIFF. Stream pixels are identified where
+        pixel values are positive (> 0). Must be aligned with the DEM.
+        When provided, computes distance to the nearest ridge that can be
+        reached without crossing a stream (topologically constrained).
+        When None, computes simple Euclidean distance to the nearest ridge.
+    output : Path
+        Path for the output 5-band GeoTIFF file.
 
-    Outputs both the distance (in map units/meters) and the coordinates of
-    the nearest ridge pixel for every non-nodata pixel in the provided DEM.
+    Returns
+    -------
+    None
+        Writes a 5-band GeoTIFF:
+          1. Row index of nearest ridge (float32)
+          2. Col index of nearest ridge (float32)
+          3. x coordinate of nearest ridge (float32)
+          4. y coordinate of nearest ridge (float32)
+          5. z (elevation) of nearest ridge (float32)
 
-    When topological mode is enabled, drainage boundaries are respected:
-    for each pixel, only ridges that do not require crossing a stream are
-    considered valid when determining the distance.
+    Notes
+    -----
+    When topological mode is enabled (by providing `streams`), drainage
+    boundaries are respected. For each pixel, only ridges that do not
+    require crossing a stream are considered valid.
 
-    For example:
+    Example topology::
 
         R₁
         |
@@ -138,45 +162,16 @@ def dist_to_ridges(dem: Path, ridges: Path, output: Path,
              |
         R₂
 
-    where, R = ridge, S = stream, X = current point
+    where R = ridge, S = stream, X = current point.
 
-    Even if X is geometrically closer to R₁ than R₂, the function will
-    select R₂ as the nearest ridge since the path to R₁ would cross a stream.
-
-    Parameters
-    ----------
-    dem : Path
-        Path to the Digital Elevation Model (DEM) GeoTIFF. Used for spatial
-        reference and nodata masking. DEM, ridges, and streams rasters must
-        be aligned (same CRS, resolution, and extent).
-    ridges : Path
-        Path to the ridges raster GeoTIFF. Non-zero values are treated as
-        ridge pixels. Can be produced by the 'extract_ridges' function.
-        Must be aligned with the DEM.
-    streams : Path
-        Path to the streams raster GeoTIFF. Non-zero values are treated as
-        stream pixels. Typically generated using tools like WhiteboxTools
-        'extract_streams'. Must be aligned with the DEM. When provided,
-        computes distance to the nearest ridge that can be reached
-        without crossing a stream (topologically constrained), else
-        computes simple Euclidean distance to the nearest ridge,
-        ignoring streams entirely.
-    output : Path
-        Path for the output 3-band GeoTIFF file.
-
-    Returns
-    -------
-    None
-        Writes a 3-band GeoTIFF to disk with the following bands:
-        - Band 1: Distance to nearest ridge (float32, in map units/meters)
-        - Band 2: Row index of nearest ridge pixel (float32)
-        - Band 3: Column index of nearest ridge pixel (float32)
+    Even if X is geometrically closer to R₁, the function will select R₂
+    as the nearest ridge since the path to R₁ would cross a stream.
     """
     with rasterio.open(dem) as src:
         dem_profile = src.profile.copy()
         dem_data = src.read(1)
         dem_nodata = src.nodata
-
+        nodata_mask = (dem_data == dem_nodata)
         dem_transform = src.transform
 
         assert abs(dem_transform.e) == abs(dem_transform.a)
@@ -211,26 +206,49 @@ def dist_to_ridges(dem: Path, ridges: Path, output: Path,
             topological=True
             )
 
-    # Write output raster with 3 bands (all float32):
-    # Band 1: Distance to nearest ridge pixel in meters
-    # Band 2: Row index of nearest ridge pixel
-    # Band 3: Column index of nearest ridge pixel
+    nearest_rows = results[1]
+    nearest_cols = results[2]
+
+    # x and y coordinates of nearest ridge pixel.
+    xs, ys = rasterio.transform.xy(
+        ridges_transform,
+        nearest_rows.ravel(), nearest_cols.ravel(),
+        offset='center'
+        )
+    xs = np.array(xs, dtype=np.float32).reshape(nearest_rows.shape)
+    ys = np.array(ys, dtype=np.float32).reshape(nearest_rows.shape)
+
+    # z (elevation) value at the location of the nearest ridge pixel.
+    z_ridge = dem_data[nearest_rows, nearest_cols].astype(np.float32)
+
+    # Apply nodata mask to all output bands
+    nearest_rows[nodata_mask] = dem_nodata
+    nearest_cols[nodata_mask] = dem_nodata
+    xs[nodata_mask] = dem_nodata
+    ys[nodata_mask] = dem_nodata
+    z_ridge[nodata_mask] = dem_nodata
+
+    # Write output raster with 5 bands (all float32):
     out_profile = dem_profile.copy()
     out_profile.update(
         dtype=rasterio.float32,
-        count=3,
+        count=5,
         compress='deflate'
         )
 
     with rasterio.open(output, 'w', **out_profile) as dst:
-        dst.write(results[0], 1)
-        dst.write(results[1], 2)
-        dst.write(results[2], 3)
+        dst.write(nearest_rows.astype(np.float32), 1)
+        dst.write(nearest_cols.astype(np.float32), 2)
+        dst.write(xs, 3)
+        dst.write(ys, 4)
+        dst.write(z_ridge, 5)
 
         # Add band descriptions
-        dst.set_band_description(1, 'distance_to_ridge_meters')
-        dst.set_band_description(2, 'nearest_ridge_row')
-        dst.set_band_description(3, 'nearest_ridge_col')
+        dst.set_band_description(1, 'nearest_ridge_row')
+        dst.set_band_description(2, 'nearest_ridge_col')
+        dst.set_band_description(3, 'nearest_ridge_x')
+        dst.set_band_description(4, 'nearest_ridge_y')
+        dst.set_band_description(5, 'nearest_ridge_z')
 
 
 def _dist_to_ridge_euclidean(
@@ -255,8 +273,8 @@ def _dist_to_ridge_euclidean(
 
     ridge_dist = np.empty((3, *dem_data.shape), dtype=np.float32)
     ridge_dist[0] = distances
-    ridge_dist[1] = indices[0]  # row index of nearest stream pixel
-    ridge_dist[2] = indices[1]  # col index of nearest stream pixel
+    ridge_dist[1] = indices[0]  # row index of nearest ridge pixel
+    ridge_dist[2] = indices[1]  # col index of nearest ridge pixel
 
     # Enforce nodata values in the DEM.
     nodata_mask = (dem_data == nodata)
@@ -340,40 +358,36 @@ def _dist_to_ridges_topological(
     return ridge_dist
 
 
-def dist_to_streams(dem: Path, streams: Path, output: Path):
+def nearest_stream_coords(dem: Path, streams: Path, output: Path):
     """
-    Calculate distance to nearest stream and its coordinates for
-    each DEM pixel.
-
-    For every pixel in the input DEM, computes the Euclidean distance to the
-    nearest stream pixel and records that stream pixel's row and column
-    indices. DEM nodata areas are preserved in all output bands.
+    Find the (x, y, z) coordinates and (row, col) indices of the nearest
+    stream pixel for each cell of the DEM.
 
     Parameters
     ----------
     dem : Path
         Path to the Digital Elevation Model (DEM) GeoTIFF. Used for spatial
-        reference and nodata masking. DEM and streams rasters must be aligned
-        (same CRS, resolution, and extent).
+        reference, nodata masking, and elevation values. DEM and streams
+        rasters must be aligned (same CRS, resolution, and extent).
     streams : Path
-        Path to the streams raster GeoTIFF. Non-zero values are treated as
-        stream pixels. Typically generated by tools like WhiteboxTools
-        'extract_streams'. Must be aligned with the DEM.
+        Path to the streams raster GeoTIFF. Stream pixels are identified where
+        pixel values are positive (> 0). Must be aligned with the DEM.
     output : Path
-        Path for the output 3-band GeoTIFF file.
+        Path for the output 5-band GeoTIFF file.
 
     Returns
     -------
     None
-        Writes a 3-band GeoTIFF to disk with the following bands:
-        - Band 1: Distance to nearest stream (float32, in map units/meters)
-        - Band 2: Row index of nearest stream pixel (float32)
-        - Band 3: Column index of nearest stream pixel (float32)
+        Writes a 5-band GeoTIFF:
+          1. Row index of nearest stream (float32)
+          2. Col index of nearest stream (float32)
+          3. x coordinate of nearest stream (float32)
+          4. y coordinate of nearest stream (float32)
+          5. z (elevation) of nearest stream (float32)
     """
     with rasterio.open(dem) as src:
         dem_profile = src.profile.copy()
         dem_data = src.read(1)
-
         dem_nodata = src.nodata
         nodata_mask = (dem_data == dem_nodata)
 
@@ -390,10 +404,10 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
     pixel_width = abs(transform.a)
 
     # Compute distances and indices of nearest stream pixel.
-    distances, indices = distance_transform_edt(
+    indices = distance_transform_edt(
         ~stream_mask,
         sampling=(pixel_height, pixel_width),
-        return_distances=True,
+        return_distances=False,
         return_indices=True
         )
 
@@ -403,176 +417,44 @@ def dist_to_streams(dem: Path, streams: Path, output: Path):
     nearest_rows = indices[0]
     nearest_cols = indices[1]
 
+    # x and y coordinates of nearest stream pixel.
+    xs, ys = rasterio.transform.xy(
+        transform, nearest_rows.ravel(), nearest_cols.ravel(), offset='center'
+        )
+    xs = np.array(xs, dtype=np.float32).reshape(nearest_rows.shape)
+    ys = np.array(ys, dtype=np.float32).reshape(nearest_rows.shape)
+
+    # z (elevation) value at the location of the nearest stream pixel
+    z_stream = dem_data[nearest_rows, nearest_cols].astype(np.float32)
+
     # Apply nodata mask to all output bands
-    distances[nodata_mask] = dem_nodata
     nearest_rows[nodata_mask] = dem_nodata
     nearest_cols[nodata_mask] = dem_nodata
+    xs[nodata_mask] = dem_nodata
+    ys[nodata_mask] = dem_nodata
+    z_stream[nodata_mask] = dem_nodata
 
-    # Write output raster with 3 bands (all float32):
-    # Band 1: Distance to nearest stream pixel in meters
-    # Band 2: Row index of nearest stream pixel
-    # Band 3: Column index of nearest stream pixel
+    # Write output raster with 5 bands (all float32):
     out_profile = dem_profile.copy()
     out_profile.update(
         dtype=rasterio.float32,
-        count=3,
+        count=5,
         compress='deflate'
         )
 
     with rasterio.open(output, 'w', **out_profile) as dst:
-        dst.write(distances.astype(np.float32), 1)
-        dst.write(nearest_rows.astype(np.float32), 2)
-        dst.write(nearest_cols.astype(np.float32), 3)
+        dst.write(nearest_rows.astype(np.float32), 1)
+        dst.write(nearest_cols.astype(np.float32), 2)
+        dst.write(xs, 3)
+        dst.write(ys, 4)
+        dst.write(z_stream, 5)
 
         # Add band descriptions
-        dst.set_band_description(1, 'distance_to_stream_meters')
-        dst.set_band_description(2, 'nearest_stream_row')
-        dst.set_band_description(3, 'nearest_stream_col')
-
-
-def height_above_nearest_drainage(dem: Path, dist_stream: Path, output: Path):
-    """
-    Calculate the height above the nearest drainage (HAND) stream for each
-    pixel in a DEM and save the results.
-
-    For each valid pixel in a digital elevation model (DEM), computes the
-    height above the nearest stream . The height above streams is
-    calculated as the elevation difference between the DEM pixel and the
-    elevation of the nearest stream. The result is saved as a raster file.
-
-    Parameters
-    ----------
-    dem : Path
-        Path to the input DEM file (Digital Elevation Model) as a GeoTIFF or
-        raster dataset.
-    dist_stream : Path
-        Path to the raster file containing distances to the nearest stream,
-        along with the stream pixel coordinates.
-    output : Path
-        Path where the output raster file containing the height differences
-        will be saved.
-
-    Output
-    ------
-    - A raster file saved to the `output` path containing the computed height
-      differences above the nearest stream as a float32 raster.
-
-    Notes
-    -----
-    - The DEM and `dist_stream` rasters must have identical spatial resolution,
-      extent, and coordinate reference system (CRS).
-    - The `dist_stream` raster must contain two additional bands with the row
-      and column indices of the nearest stream pixels.
-    - Pixels with NoData values in the DEM are excluded from the computation.
-    """
-    with rasterio.open(dem) as src:
-        dem_profile = src.profile
-        dem_data = src.read(1)
-        dem_nodata = src.nodata
-
-        dem_width = src.width
-        dem_height = src.height
-
-        dem_transform = src.transform
-
-    with rasterio.open(dist_stream) as src:
-        assert dem_transform == src.transform
-        stream_rows = src.read(2).astype(int)
-        stream_cols = src.read(3).astype(int)
-        dist_stream_nodata = int(src.nodata)
-
-    # Valid where both DEM and projected stream are not nodata
-    valid_pixels = (
-        (dem_data != dem_nodata) &
-        (stream_rows != dist_stream_nodata) &
-        (stream_cols != dist_stream_nodata)
-        )
-
-    # Compute where valid.
-    hand = np.full(
-        (dem_height, dem_width), dem_nodata, dtype=np.float32
-        )
-    hand[valid_pixels] = (
-        dem_data[valid_pixels] -
-        dem_data[stream_rows[valid_pixels], stream_cols[valid_pixels]]
-        )
-
-    # Write output.
-    out_profile = dem_profile.copy()
-    out_profile.update(dtype=rasterio.float32, compress='deflate', count=1)
-    with rasterio.open(output, 'w', **out_profile) as dst:
-        dst.write(hand, 1)
-
-
-def height_below_nearest_ridge(dem: Path, dist_ridge: Path, output: Path):
-    """
-    Calculate the height below the nearest ridge (HBNR) for each pixel in
-    a DEM and save the results.
-
-    For each valid pixel in a digital elevation model (DEM), computes the
-    height below the nearest ridge by subtracting the DEM value at each pixel
-    from the DEM value at its nearest ridge pixel (as given by dist_ridge).
-
-    Pixels are set to nodata if either the input DEM or nearest ridge indices
-    are nodata.
-
-    Parameters
-    ----------
-    dem : Path
-        Path to the input DEM file (GeoTIFF).
-    dist_ridge : Path
-        Path to a raster with 3 bands:
-        - Band 1: Distance to nearest ridge
-        - Band 2: Row index of nearest ridge pixel
-        - Band 3: Column index of nearest ridge pixel
-    output : Path
-        Output path for the float32 GeoTIFF containing height below
-        nearest ridge.
-
-    Notes
-    -----
-    - The DEM and `dist_ridge` rasters must have identical spatial resolution,
-      extent, and coordinate reference system (CRS).
-    - The `dist_ridge` raster must contain two additional bands with the row
-      and column indices of the nearest ridge pixels.
-    - Pixels with NoData values in the DEM are excluded from the computation.
-    """
-    with rasterio.open(dem) as src:
-        dem_profile = src.profile
-        dem_data = src.read(1)
-        dem_nodata = src.nodata
-        dem_transform = src.transform
-
-        dem_width = src.width
-        dem_height = src.height
-
-    with rasterio.open(dist_ridge) as src:
-        assert dem_transform == src.transform
-        ridge_rows = src.read(2).astype(int)
-        ridge_cols = src.read(3).astype(int)
-        ridge_nodata = int(src.nodata)
-
-    # Valid where both DEM and projected ridge are not nodata
-    valid_pixels = (
-        (dem_data != dem_nodata) &
-        (ridge_rows != ridge_nodata) &
-        (ridge_cols != ridge_nodata)
-        )
-
-    # Compute where valid.
-    hbnr = np.full(
-        (dem_height, dem_width), dem_nodata, dtype=np.float32
-        )
-    hbnr[valid_pixels] = (
-        dem_data[ridge_rows[valid_pixels], ridge_cols[valid_pixels]] -
-        dem_data[valid_pixels]
-        )
-
-    # Write output.
-    out_profile = dem_profile.copy()
-    out_profile.update(dtype=rasterio.float32, compress='deflate', count=1)
-    with rasterio.open(output, 'w', **out_profile) as dst:
-        dst.write(hbnr, 1)
+        dst.set_band_description(1, 'nearest_stream_row')
+        dst.set_band_description(2, 'nearest_stream_col')
+        dst.set_band_description(3, 'nearest_stream_x')
+        dst.set_band_description(4, 'nearest_stream_y')
+        dst.set_band_description(5, 'nearest_stream_z')
 
 
 def local_stats(raster: Path, window: int, output: Path,
@@ -766,13 +648,14 @@ def generate_topo_features_for_tile(
     tile_index = tile_bbox_data.tile_index
     ty, tx = ast.literal_eval(tile_index)
 
-    FEATURES = ['dem', 'dem_smooth', 'dem_cond',
-                'flow_accum', 'streams', 'geomorphons',
-                'slope', 'curvature', 'dist_stream', 'ridges',
-                'dist_top', 'alt_stream', 'alt_top',
-                'long_hessian_stats', 'long_grad_stats',
-                'short_grad_stats', 'stream_grad_stats',
-                'stream_hessian_stats']
+    FEATURES = [
+        'dem', 'dem_smooth', 'dem_cond', 'slope', 'curvature',
+        'flow_accum', 'streams', 'nearest_stream_coords',
+        'geomorphons', 'ridges', 'dist_top',
+        'long_hessian_stats', 'long_grad_stats',
+        'short_grad_stats',
+        'stream_grad_stats', 'stream_hessian_stats'
+        ]
 
     wbt = whitebox.WhiteboxTools()
     wbt.verbose = False
@@ -868,8 +751,8 @@ def generate_topo_features_for_tile(
             'func': wbt.profile_curvature,
             'kwargs': {'dem': tile_paths['dem_cond']}
             },
-        'dist_stream': {
-            'func': dist_to_streams,
+        'nearest_stream_coords': {
+            'func': nearest_stream_coords,
             'kwargs': {'dem': tile_paths['dem_cond'],
                        'streams': tile_paths['streams']}
             },
@@ -877,24 +760,15 @@ def generate_topo_features_for_tile(
             'func': extract_ridges,
             'kwargs': {'geomorphons': tile_paths['geomorphons'],
                        'ridge_size': ridge_size,
-                       'flow_acc': tile_paths['flow_accum'],
-                       'max_flow_acc': 2}
+                       # 'flow_acc': tile_paths['flow_accum'],
+                       # 'max_flow_acc': 2
+                       }
 
             },
-        'dist_top': {
-            'func': dist_to_ridges,
+        'nearest_ridge_coords': {
+            'func': nearest_ridge_coords,
             'kwargs': {'dem': tile_paths['dem_cond'],
                        'ridges': tile_paths['ridges']}
-            },
-        'alt_stream': {
-            'func': height_above_nearest_drainage,
-            'kwargs': {'dem': tile_paths['dem_cond'],
-                       'dist_stream': tile_paths['dist_stream']}
-            },
-        'alt_top': {
-            'func': height_below_nearest_ridge,
-            'kwargs': {'dem': tile_paths['dem_cond'],
-                       'dist_ridge': tile_paths['dist_top']}
             },
         'long_hessian_stats': {
             'func': local_stats,
@@ -941,21 +815,3 @@ def generate_topo_features_for_tile(
     ttot1 = perf_counter()
     print(f"{print_affix} All topo feature for tile {tile_index} "
           f"computed in {round(ttot1 - ttot0):0.0f} sec")
-
-
-if __name__ == '__main__':
-    from sahel import __datadir__ as datadir
-    tile_dir = datadir / "training" / "tiles (overlapped)"
-
-    output = tile_dir / "dist_ridge" / "dist_ridge_tile_017_012.tif"
-    output.parent.mkdir(parents=True, exist_ok=True)
-
-    from time import perf_counter
-    t0 = perf_counter()
-    dist_to_ridges(
-        dem=tile_dir / "dem" / "dem_tile_017_012.tif",
-        ridges=tile_dir / "ridges" / "ridges_tile_017_012.tif",
-        streams=tile_dir / "streams" / "streams_tile_017_012.tif",
-        output=output
-        )
-    t1 = perf_counter()
