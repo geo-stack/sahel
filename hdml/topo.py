@@ -543,9 +543,8 @@ def stream_stats(
     raster : Path
         Path to input raster (e.g., DEM, slope, or other terrain attribute).
     dist_stream : Path
-        Path to 3-band raster from `dist_to_streams()` containing distance
-        to nearest stream (band 1), stream row index (band 2), and stream
-        column index (band 3).
+        Path to 5-band raster from `nearest_stream_coords()` where the
+        row index and col index of nearest stream is stored in Band 1 & 2..
     output : Path
         Output path for 6-band GeoTIFF with statistics:
         Band 1: minimum, Band 2: maximum, Band 3: mean,
@@ -564,8 +563,8 @@ def stream_stats(
         height = src.height
 
     with rasterio.open(dist_stream) as src:
-        stream_rows = src.read(2).astype(int)
-        stream_cols = src.read(3).astype(int)
+        stream_rows = src.read(1).astype(int)
+        stream_cols = src.read(2).astype(int)
         dist_stream_nodata = int(src.nodata)
 
     # Identify valid pixels:  must have valid raster data AND valid
