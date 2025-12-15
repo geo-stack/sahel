@@ -23,6 +23,9 @@ from hdml.topo import generate_topo_features_for_tile
 TILES_OVERLAP_DIR = datadir / 'topo' / 'tiles (cropped)'
 TILES_CROPPED_DIR = datadir / 'topo' / 'tiles (overlapped)'
 
+TILES_OVERLAP_DIR.mkdir(parents=True, exist_ok=True)
+TILES_CROPPED_DIR.mkdir(parents=True, exist_ok=True)
+
 tiles_gdf = gpd.read_file(datadir / "topo" / "tiles_geom_training.gpkg")
 
 tile_count = 0
