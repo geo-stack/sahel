@@ -721,6 +721,14 @@ def generate_topo_features_for_tile(
             'func': wbt.fill_depressions,
             'kwargs': {'dem': tile_paths['dem_smooth']}
             },
+        'slope': {
+            'func': wbt.slope,
+            'kwargs': {'dem': tile_paths['dem_cond']}
+            },
+        'curvature': {
+            'func': wbt.profile_curvature,
+            'kwargs': {'dem': tile_paths['dem_cond']}
+            },
         'flow_accum': {
             'func': wbt.d8_flow_accumulation,
             'kwargs': {'i': tile_paths['dem_cond'],
@@ -730,6 +738,11 @@ def generate_topo_features_for_tile(
             'func': wbt.extract_streams,
             'kwargs': {'flow_accum': tile_paths['flow_accum'],
                        'threshold': extract_streams_treshold}
+            },
+        'nearest_stream_coords': {
+            'func': nearest_stream_coords,
+            'kwargs': {'dem': tile_paths['dem_cond'],
+                       'streams': tile_paths['streams']}
             },
         'geomorphons': {
             'func': wbt.geomorphons,
@@ -741,19 +754,6 @@ def generate_topo_features_for_tile(
                        'forms': True,
                        'residuals': True
                        }
-            },
-        'slope': {
-            'func': wbt.slope,
-            'kwargs': {'dem': tile_paths['dem_cond']}
-            },
-        'curvature': {
-            'func': wbt.profile_curvature,
-            'kwargs': {'dem': tile_paths['dem_cond']}
-            },
-        'nearest_stream_coords': {
-            'func': nearest_stream_coords,
-            'kwargs': {'dem': tile_paths['dem_cond'],
-                       'streams': tile_paths['streams']}
             },
         'ridges': {
             'func': extract_ridges,
@@ -787,13 +787,13 @@ def generate_topo_features_for_tile(
         'stream_grad_stats': {
             'func': stream_stats,
             'kwargs': {'raster': tile_paths['slope'],
-                       'dist_stream': tile_paths['dist_stream'],
+                       'dist_stream': tile_paths['nearest_stream_coords'],
                        'fisher': False}
             },
         'stream_hessian_stats': {
             'func': stream_stats,
             'kwargs': {'raster': tile_paths['curvature'],
-                       'dist_stream': tile_paths['dist_stream'],
+                       'dist_stream': tile_paths['nearest_stream_coords'],
                        'fisher': False}
             },
         }
