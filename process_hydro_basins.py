@@ -79,11 +79,11 @@ layer_name = f'BasinATLAS_v10_lev{level:02d}'
 
 zip_path = DEST_FOLDER / 'BasinATLAS_Data_v10.gdb.zip'
 extract_dir = DEST_FOLDER / 'BasinATLAS_Data_v10'
-extract_dir.mkdir(parents=True, exist_ok=True)
-
-print("Extrating zip archive...", flush=True)
-with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-    zip_ref.extractall(extract_dir)
+if not extract_dir.exists():
+    print("Extrating zip archive...", flush=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_dir)
 
 basins_all_path = extract_dir / 'BasinATLAS_v10.gdb'
 
