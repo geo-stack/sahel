@@ -153,6 +153,8 @@ zonal_index_map, small_basin_ids = build_zonal_index_map(
     DEST_DIR / tif_fnames[0], basins_gdf
     )
 
+# %%
+
 # Extract precip means for each basin.
 
 ntot = len(tif_index)

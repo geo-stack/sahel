@@ -118,7 +118,6 @@ basins_gdf = basins_gdf.set_index('HYBAS_ID', drop=True)
 basins_gdf = basins_gdf.loc[gwl_gdf['HYBAS_ID'].unique()]
 basins_gdf = basins_gdf['geometry']
 
-
 basins_gdf.to_file(datadir / "data" / "wtd_basin_geometry.gpkg", driver="GPKG")
 
 
