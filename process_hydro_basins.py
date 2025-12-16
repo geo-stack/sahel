@@ -43,7 +43,6 @@ DEST_FOLDER.mkdir(parents=True, exist_ok=True)
 key = 'BasinATLAS'
 url = 'https://figshare.com/ndownloader/files/20082137'
 
-
 with requests.get(url, stream=True) as r:
     r.raise_for_status()
 
@@ -68,12 +67,6 @@ with requests.get(url, stream=True) as r:
 
 # Extract basins level 12 from the BasinATLAS.
 
-africa_gdf = gpd.read_file(datadir / 'coastline' / 'africa_landmass.gpkg')
-africa_shape = africa_gdf.union_all()
-
-minx, miny, maxx, maxy = africa_gdf.total_bounds
-africa_bbox = box(minx, miny, maxx, maxy)
-
 level = 12
 layer_name = f'BasinATLAS_v10_lev{level:02d}'
 
@@ -85,6 +78,22 @@ if not extract_dir.exists():
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
+# %%
+
+# Clip the basins to the African continent.
+
+africa_simple_path = datadir / 'coastline' / 'africa_landmass_simple.gpkg'
+
+if not africa_simple_path.exists():
+    africa_gdf = gpd.read_file(
+        datadir / 'coastline' / 'africa_landmass_simple.gpkg')
+    africa_simple = africa_gdf.buffer(5000)
+    africa_simple = africa_simple.buffer(-5000)
+    africa_simple = africa_simple.simplify(1000, preserve_topology=False)
+    africa_simple.to_file(africa_simple_path)
+
+africa_gdf = gpd.read_file(africa_simple_path)
+
 basins_all_path = extract_dir / 'BasinATLAS_v10.gdb'
 
 print(f'Reading {layer_name} from {basins_all_path.name}...', flush=True)
@@ -94,15 +103,20 @@ print('Number of basins:', len(basins_gdf), flush=True)
 print('Projecting to ESRI:102022...', flush=True)
 basins_gdf = basins_gdf.to_crs('ESRI:102022')
 
-# We only clip to the bounding box of the African continent because
-# clipping to the shape is too long.
+# Clipping to the non-simplifed African continent shape is way too long,
+# so we need to do this in two steps and use a simplified shape.
+
 print("Clipping to African continent bbox...", flush=True)
-basins_gdf = gpd.clip(basins_gdf, africa_bbox)
-print('Number of basins:', len(basins_gdf), flush=True)
+basins_gdf_bbox = gpd.clip(basins_gdf, box(*africa_gdf.total_bounds))
+print('Number of basins:', len(basins_gdf_bbox), flush=True)
+
+print("Clipping to simplified African continent shape...", flush=True)
+basins_africa = gpd.clip(basins_gdf_bbox, africa_gdf.union_all())
+print('Number of basins:', len(basins_africa), flush=True)
 
 print("Saving results to file...", flush=True)
 basins_path = DEST_FOLDER / f'basins_lvl{level:02d}_102022.gpkg'
-basins_gdf.to_file(basins_path, layer=layer_name, driver="GPKG")
+basins_africa.to_file(basins_path, layer=layer_name, driver="GPKG")
 
 # Clean up temp files.
 shutil.rmtree(extract_dir)
