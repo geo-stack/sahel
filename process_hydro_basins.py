@@ -40,33 +40,28 @@ DEST_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # Download ATLAS databases.
 
+key = 'BasinATLAS'
+url = 'https://figshare.com/ndownloader/files/20082137'
 
-urls = {'BasinATLAS': 'https://figshare.com/ndownloader/files/20082137',
-        'RiverATLAS': 'https://figshare.com/ndownloader/files/20087321',
-        'LakeATLAS': 'https://figshare.com/ndownloader/files/35959544'}
 
-for key, url in urls.items():
+with requests.get(url, stream=True) as r:
+    r.raise_for_status()
 
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
+    # Get the filename from the response headers.
+    cd = r.headers.get("Content-Disposition", "")
+    filename = cd.split("filename=")[-1].strip('"')
 
-        # Get the filename from the response headers.
-        cd = r.headers.get("Content-Disposition", "")
-        filename = cd.split("filename=")[-1].strip('"')
+    local_path = DEST_FOLDER / filename
 
-        local_path = DEST_FOLDER / filename
-
-        # Skip if already downloaded.
-        if local_path.exists():
-            print(f"Skipping {filename}, already exists.")
-            continue
-
+    # Skip if already downloaded.
+    if not local_path.exists():
         print(f"Downloading {filename}...")
         with open(local_path, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
-
         print(f"Downloaded {local_path.name} sucessfully.")
+    else:
+        print(f"'{filename}' already exists.")
 
 
 # %%
