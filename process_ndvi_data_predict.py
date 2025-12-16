@@ -112,7 +112,6 @@ MOSAIC_DIR.mkdir(parents=True, exist_ok=True)
 
 tif_file_index_path = NDVI_DIR / 'ndvi_tiles_index.csv'
 mosaic_index_path = NDVI_DIR / 'ndvi_mosaic_index.csv'
-basin_ndvi_path = NDVI_DIR / 'ndvi_basin_mean_values.h5'
 
 
 # %%
@@ -257,87 +256,98 @@ for index, row in tif_file_index.iterrows():
 mosaic_index = mosaic_index.dropna(how='all')
 mosaic_index.to_csv(mosaic_index_path)
 
-# %%
-
-# Generate the basin zonal index map for the PREDICT dataset, which
-# includes data for the whole African continent for the years defined
-# in 'predict_year_range'.
-
-mosaic_index = pd.read_csv(
-    mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
-    )
-
-# Make sure to run 'process_hydro_basins.py' to generate the
-# the 'basins_lvl12_102022.gpkg' file.
-print('Loading hydro atlas basin lvl12 database...', flush=True)
-basins_path = datadir / 'hydro_atlas' / 'basins_lvl12_102022.gpkg'
-basins_gdf = gpd.read_file(basins_path)
-basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
-basins_gdf.index = basins_gdf.index.astype(int)
-
-mask = (
-    (np.isin(mosaic_index.index.year, predict_year_range)) &
-    (~pd.isnull(mosaic_index.file))
-    )
-
-print('Building the basins zonal index map...', flush=True)
-mosaic_fnames = np.unique(mosaic_index.file[mask])
-zonal_index_map, bad_basin_ids = build_zonal_index_map(
-    MOSAIC_DIR / mosaic_fnames[0], basins_gdf
-    )
-
-print('Initiating the basin ndvi dataframe...', flush=True)
-index = mosaic_index.index[mask]
-columns = list(basins_gdf.index)
-basin_ndvi_means = pd.DataFrame(
-    data=np.full((len(index), len(columns)), np.nan, dtype='float32'),
-    index=index,
-    columns=columns
-    )
-
-basin_ndvi_means.to_hdf(basin_ndvi_path, key='ndvi', mode='w')
-
 
 # %%
 
-# Extract NDVI means for each basin of the African continent for the
-# years 2024-2025.
+def extract_basins_zonal_means(
+        mosaic_index_path: Path,
+        basins_path: Path,
+        year_start: int, year_end: int
+        ):
 
-mosaic_index = pd.read_csv(
-    mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
-    )
+    mosaic_index = pd.read_csv(
+        mosaic_index_path,
+        index_col=0,
+        parse_dates=True,
+        dtype={'file': str}
+        )
 
-basin_ndvi_means = pd.read_hdf(
-    basin_ndvi_path, key='ndvi'
-    )
+    basins_path = Path(basins_path)
+    if not basins_path.exists():
+        raise FileNotFoundError(
+            "Make sure to run 'process_hydro_basins.py' to generate the "
+            "the 'basins_lvl12_102022.gpkg' file."
+            )
 
-ntot = len(mosaic_fnames)
-count = 0
-for mosaic_name in mosaic_fnames:
-    t0 = perf_counter()
-    dates = mosaic_index.loc[mosaic_index.file == mosaic_name].index
+    print('Loading hydro atlas basins...', flush=True)
+    basins_gdf = gpd.read_file(basins_path)
+    basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
+    basins_gdf.index = basins_gdf.index.astype(int)
 
-    if not np.any(pd.isnull(basin_ndvi_means.loc[dates])):
-        print(f"[{count+1:02d}/{ntot}] Skipping because {mosaic_name} "
-              f"is already processed.")
+    # Generate the basin zonal index map for the PREDICT dataset, which
+    # includes data for the whole African continent for the years defined
+    # in 'predict_year_range'.
+
+    print('Building the basins zonal index map...', flush=True)
+
+    years = list(range(year_start, year_end + 1))
+    mask = (
+        (np.isin(mosaic_index.index.year, years)) &
+        (~pd.isnull(mosaic_index.file))
+        )
+
+    mosaic_fnames = np.unique(mosaic_index.file[mask])
+    zonal_index_map, bad_basin_ids = build_zonal_index_map(
+        MOSAIC_DIR / mosaic_fnames[0], basins_gdf
+        )
+
+    # Initiating the basin ndvi dataframe.
+    index = mosaic_index.index[mask]
+    columns = list(basins_gdf.index)
+    basin_ndvi_means = pd.DataFrame(
+        data=np.full((len(index), len(columns)), np.nan, dtype='float32'),
+        index=index,
+        columns=columns
+        )
+
+    ntot = len(mosaic_fnames)
+    count = 0
+    for mosaic_name in mosaic_fnames:
+        t0 = perf_counter()
+        dates = mosaic_index.loc[mosaic_index.file == mosaic_name].index
+
+        print(f"[{count+1:02d}/{ntot}] Processing {mosaic_name}...", end=' ')
+
+        mean_ndvi, basin_ids = extract_zonal_means(
+            MOSAIC_DIR / mosaic_name, zonal_index_map)
+        mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
+
+        assert list(basin_ids) == list(basin_ndvi_means.columns)
+        basin_ndvi_means.loc[dates] = mean_ndvi.astype('float32')
+
         count += 1
-        continue
+        t1 = perf_counter()
+        print(f'done in {t1 - t0:0.1f} sec')
 
-    print(f"[{count+1:02d}/{ntot}] Processing {mosaic_name}...", end=' ')
+    return basin_ndvi_means
 
-    mean_ndvi, basin_ids = extract_zonal_means(
-        MOSAIC_DIR / mosaic_name, zonal_index_map)
-    mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
 
-    print()
-    print(perf_counter() - t0)
+ndvi_means_africa_basins = extract_basins_zonal_means(
+    mosaic_index_path=mosaic_index_path,
+    basins_path=datadir / 'hydro_atlas' / 'basins_lvl12_102022.gpkg',
+    year_start=predict_year_range[0],
+    year_end=predict_year_range[1]
+    )
+ndvi_means_africa_basins.to_hdf(
+    NDVI_DIR / 'ndvi_means_africa_basins.h5', key='ndvi', mode='w'
+    )
 
-    assert list(basin_ids) == list(basin_ndvi_means.columns)
-    basin_ndvi_means.loc[dates] = mean_ndvi.astype('float32')
-
-    count += 1
-    t1 = perf_counter()
-    print(f'done in {t1 - t0:0.1f} sec')
-
-# %%
-basin_ndvi_means.to_hdf(basin_ndvi_path, key='ndvi', mode='w')
+ndvi_means_wtd_basins = extract_basins_zonal_means(
+    mosaic_index_path=mosaic_index_path,
+    basins_path=datadir / 'data' / 'wtd_basin_geometry.gpkg',
+    year_start=training_year_range[0],
+    year_end=training_year_range[1]
+    )
+ndvi_means_wtd_basins.to_hdf(
+    NDVI_DIR / 'ndvi_means_wtd_basins.h5', key='ndvi', mode='w'
+    )
