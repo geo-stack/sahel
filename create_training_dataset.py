@@ -39,6 +39,9 @@ joined = joined.drop(columns=['index_right'])
 
 # %%
 
+gwl_gdf['point_x'] = gwl_gdf.geometry.x
+gwl_gdf['point_y'] = gwl_gdf.geometry.y
+
 input_dir = datadir / 'topo' / 'tiles (cropped)'
 
 ntot = len(np.unique(joined.tile_index))
@@ -51,24 +54,38 @@ for tile_idx, group in joined.groupby('tile_index'):
     import ast
     ty, tx = ast.literal_eval(tile_idx)
 
-    names = [
-        'dist_stream',
-        'alt_stream',
-        'dist_top',
-        'alt_top'
-        ]
+    name = 'dem_cond'
+    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    tif_path = input_dir / name / tile_name
+    with rasterio.open(tif_path) as src:
+        values = np.array(list(src.sample(coords)))
+        values[values == src.nodata] = np.nan
 
-    for name in names:
-        tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
-        tif_path = input_dir / name / tile_name
+        gwl_gdf.loc[group.index, 'point_z'] = values[:, 0]
 
-        with rasterio.open(tif_path) as src:
-            values = np.array(list(src.sample(coords)))
-            values[values == src.nodata] = np.nan
+    name = 'nearest_stream_coords'
+    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    tif_path = input_dir / name / tile_name
+    with rasterio.open(tif_path) as src:
+        values = np.array(list(src.sample(coords)))
+        values[values == src.nodata] = np.nan
 
-        gwl_gdf.loc[group.index, name] = values[:, 0]
+        gwl_gdf.loc[group.index, 'stream_x'] = values[:, 2]
+        gwl_gdf.loc[group.index, 'stream_y'] = values[:, 3]
+        gwl_gdf.loc[group.index, 'stream_z'] = values[:, 4]
 
-    stat_index_map = {
+    name = 'nearest_ridge_coords'
+    tile_name = f'{name}_tile_{ty:03d}_{tx:03d}.tif'
+    tif_path = input_dir / name / tile_name
+    with rasterio.open(tif_path) as src:
+        values = np.array(list(src.sample(coords)))
+        values[values == src.nodata] = np.nan
+
+        gwl_gdf.loc[group.index, 'ridge_x'] = values[:, 2]
+        gwl_gdf.loc[group.index, 'ridge_y'] = values[:, 3]
+        gwl_gdf.loc[group.index, 'ridge_z'] = values[:, 4]
+
+    band_index_map = {
         'min': 0,
         'max': 1,
         'mean': 2,
@@ -77,7 +94,7 @@ for tile_idx, group in joined.groupby('tile_index'):
         'kurt': 5
         }
 
-    name_stat = {
+    name_bands = {
         'long_hessian': ['max', 'mean', 'var', 'skew', 'kurt'],
         'long_grad': ['mean', 'var'],
         'short_grad': ['max', 'var', 'mean'],
@@ -85,7 +102,7 @@ for tile_idx, group in joined.groupby('tile_index'):
         'stream_hessian': ['max']
         }
 
-    for name, stats in name_stat.items():
+    for name, bands in name_bands.items():
         tile_name = f'{name}_stats_tile_{ty:03d}_{tx:03d}.tif'
         tif_path = input_dir / f'{name}_stats' / tile_name
 
@@ -93,21 +110,37 @@ for tile_idx, group in joined.groupby('tile_index'):
             values = np.array(list(src.sample(coords)))
             values[values == src.nodata] = np.nan
 
-        for stat in stats:
-            index = stat_index_map[stat]
-            gwl_gdf.loc[group.index, f'{name}_{stat}'] = values[:, index]
+        for band in bands:
+            index = band_index_map[band]
+            gwl_gdf.loc[group.index, f'{name}_{band}'] = values[:, index]
 
     count += 1
 
+
+# %%
 pixel_size = 30
 
+gwl_gdf['dist_stream'] = (
+    (gwl_gdf.point_x - gwl_gdf.stream_x)**2 +
+    (gwl_gdf.point_y - gwl_gdf.stream_y)**2
+    )**0.5
+
+gwl_gdf['dist_top'] = (
+    (gwl_gdf.point_x - gwl_gdf.ridge_x)**2 +
+    (gwl_gdf.point_y - gwl_gdf.ridge_y)**2
+    )**0.5
+
 gwl_gdf['ratio_dist'] = (
-    gwl_gdf['dist_stream'] / (np.maximum(gwl_gdf['dist_top'], pixel_size))
+    gwl_gdf.dist_stream / (np.maximum(gwl_gdf.dist_top, pixel_size))
     )
+
+gwl_gdf['alt_stream'] = gwl_gdf.point_z - gwl_gdf.stream_z
+
+gwl_gdf['alt_top'] = gwl_gdf.ridge_z - gwl_gdf.point_z
+
 gwl_gdf['ratio_stream'] = (
     gwl_gdf['alt_stream'] / np.maximum(gwl_gdf['dist_stream'], pixel_size)
     )
-
 
 gwl_gdf.to_file(datadir / "wtd_obs_training_dataset.gpkg", driver="GPKG")
 gwl_gdf.to_csv(datadir / "wtd_obs_training_dataset.csv")
