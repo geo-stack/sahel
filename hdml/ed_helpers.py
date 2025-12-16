@@ -190,3 +190,32 @@ def MOD13Q1_hdf_to_geotiff(
     return (metadata['tile_name'],
             metadata['RANGEBEGINNINGDATE'],
             metadata['RANGEENDINGDATE'])
+
+
+def get_mod13q1_hdf_urls(
+        modis_tilename: str, year_from, year_to
+        ):
+    print(f"Searching granules for tile {modis_tilename}...")
+    granules = earthaccess.search_data(
+        short_name="MOD13Q1",
+        version="061",
+        cloud_hosted=False,
+        temporal=(f"{year_from - 1}-12-31", f"{year_to + 1}-01-01"),
+        granule_name=f"*{modis_tilename}*"
+    )
+    print(f"  Found {len(granules)} granules for {modis_tilename}")
+
+    hdf_urls = {}
+    for granule in granules:
+        tile_id = granule['meta']['native-id']
+
+        for url_data in granule['umm']['RelatedUrls']:
+            url = url_data['URL']
+            if url.endswith('hdf'):
+                break
+        else:
+            raise ValueError("Cannot find a URL ending with '.hdf'.")
+
+        hdf_urls[tile_id] = url
+
+    return hdf_urls
