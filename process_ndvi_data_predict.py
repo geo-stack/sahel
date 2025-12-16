@@ -22,28 +22,80 @@ from time import perf_counter
 # ---- Third party imports
 from osgeo import gdal
 import pandas as pd
+from pandas.io.parquet import read_parquet
 import geopandas as gpd
 import numpy as np
 import rasterio
 
 # ---- Local imports
 from hdml import __datadir__ as datadir
-from hdml.ed_helpers import earthaccess_login, MOD13Q1_hdf_to_geotiff
+from hdml.ed_helpers import (
+    earthaccess_login, MOD13Q1_hdf_to_geotiff, get_mod13q1_hdf_urls)
 from hdml.zonal_extract import build_zonal_index_map, extract_zonal_means
 
+# MODIS_TILE_NAMES specifies which MODIS tiles to download NDVI data for,
+# along with the year ranges:
+# - For 2024 and 2025: Download all tiles covering Africa for static
+#   water depth prediction.
+# - For tiles where water level observations are available, download data
+#   for 2000–2025 for model training.
+# If more observation sites are added to the training dataset, update this
+# list to include the corresponding tiles and years.
+# See https://modis-land.gsfc.nasa.gov/MODLAND_grid.html
+
+predict_year_range = (2024, 2025)
+training_year_range = (2000, 2025)
+
 MODIS_TILE_NAMES = [
-              'h17v05', 'h18v05', 'h19v05', 'h20v05',
-    'h16v06', 'h17v06', 'h18v06', 'h19v06', 'h20v06', 'h21v06',
-    'h16v07', 'h17v07', 'h18v07', 'h19v07', 'h20v07', 'h21v07', 'h22v07',
-    'h16v08', 'h17v08', 'h18v08', 'h19v08', 'h20v08', 'h21v08', 'h22v08',
-                        'h18v09', 'h19v09', 'h20v09', 'h21v09', 'h22v09',
-                                  'h19v10', 'h20v10', 'h21v10', 'h22v10',
-                                  'h19v11', 'h20v11', 'h21v11',
-                                  'h19v12', 'h20v12'
+    # row 05
+    ('h17v05', *predict_year_range),
+    ('h18v05', *predict_year_range),
+    ('h19v05', *predict_year_range),
+    ('h20v05', *predict_year_range),
+    # row 06
+    ('h16v06', *predict_year_range),
+    ('h17v06', *predict_year_range),
+    ('h18v06', *predict_year_range),
+    ('h19v06', *predict_year_range),
+    ('h20v06', *predict_year_range),
+    ('h21v06', *predict_year_range),
+    # row 07
+    ('h16v07', *training_year_range),
+    ('h17v07', *training_year_range),
+    ('h18v07', *training_year_range),
+    ('h19v07', *training_year_range),
+    ('h20v07', *training_year_range),
+    ('h21v07', *predict_year_range),
+    ('h22v07', *predict_year_range),
+    # row 08
+    ('h16v08', *training_year_range),
+    ('h17v08', *training_year_range),
+    ('h18v08', *training_year_range),
+    ('h19v08', *training_year_range),
+    ('h20v08', *predict_year_range),
+    ('h21v08', *predict_year_range),
+    ('h22v08', *predict_year_range),
+    # row 09
+    ('h18v09', *predict_year_range),
+    ('h19v09', *predict_year_range),
+    ('h20v09', *predict_year_range),
+    ('h21v09', *predict_year_range),
+    ('h22v09', *predict_year_range),
+    # row 10
+    ('h19v10', *predict_year_range),
+    ('h20v10', *predict_year_range),
+    ('h21v10', *predict_year_range),
+    ('h22v10', *predict_year_range),
+    # row 11
+    ('h19v11', *predict_year_range),
+    ('h20v11', *predict_year_range),
+    ('h21v11', *predict_year_range),
+    # row 12
+    ('h19v12', *predict_year_range),
+    ('h20v12', *predict_year_range)
     ]
 
-
-NDVI_DIR = datadir / 'ndvi_predict'
+NDVI_DIR = datadir / 'ndvi'
 NDVI_DIR.mkdir(parents=True, exist_ok=True)
 
 HDF_DIR = Path("E:/Banque Mondiale (HydroDepthML)/MODIS MOD13Q1 HDF 250m")
@@ -58,13 +110,9 @@ VRT_DIR.mkdir(parents=True, exist_ok=True)
 MOSAIC_DIR = NDVI_DIR / 'mosaic'
 MOSAIC_DIR.mkdir(parents=True, exist_ok=True)
 
-tif_file_index_path = NDVI_DIR / "ndvi_tiles_index.csv"
+tif_file_index_path = NDVI_DIR / 'ndvi_tiles_index.csv'
 mosaic_index_path = NDVI_DIR / 'ndvi_mosaic_index.csv'
-
-basins_path = datadir / 'hydro_atlas' / 'basins_lvl12_102022.gpkg'
-basins_gdf = gpd.read_file(basins_path)
-basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
-basins_gdf.index = basins_gdf.index.astype(int)
+basin_ndvi_path = NDVI_DIR / 'ndvi_basin_mean_values.h5'
 
 
 # %%
@@ -74,89 +122,64 @@ basins_gdf.index = basins_gdf.index.astype(int)
 print("Authenticating with NASA Earthdata...")
 earthaccess = earthaccess_login()
 
-# Get the list of available hDF names from the NDVI MODIS dataset.
+# Get the list of available hDF names from the NDVI MODIS dataset for the
+# entire African continent.
 
-all_granules = []
-for tile in MODIS_TILE_NAMES:
-    print(f"Searching for tile {tile}...")
-    granules = earthaccess.search_data(
-        short_name="MOD13Q1",
-        version="061",
-        cloud_hosted=False,
-        temporal=("2023-12-31", "2026-01-01"),
-        granule_name=f"*{tile}*"
-    )
-    all_granules.extend(granules)
-    print(f"  Found {len(granules)} granules for {tile}")
-
-
-hdf_names = {}
-for granule in all_granules:
-    tile_id = granule['meta']['native-id']
-    if 'A2025' not in tile_id and 'A2024' not in tile_id:
-        continue
-
-    for url_data in granule['umm']['RelatedUrls']:
-        url = url_data['URL']
-        if url.endswith('hdf'):
-            break
-    else:
-        raise ValueError("Cannot find a URL ending with '.hdf'.")
-
-    hdf_names[tile_id] = url
+hdf_urls = {}
+for tile_name, year_from, year_to in MODIS_TILE_NAMES:
+    print(f"Getting HDF urls for tile {tile_name}...")
+    tile_hdf_urls = get_mod13q1_hdf_urls(tile_name, year_from, year_to)
+    hdf_urls.update(tile_hdf_urls)
+    print(f"  Found {len(tile_hdf_urls)} granules for {tile_name}")
 
 
 # %%
 
-# Download the NDVI MODIS tiles and convert to GeoTIFF.
+# Download the NDVI MODIS tiles and convert to GeoTIFF (skip if they exist).
 
-if not tif_file_index_path.exists():
-    index = pd.MultiIndex.from_tuples([], names=['date_start', 'date_end'])
-    index_df = pd.DataFrame(index=index)
-else:
-    index_df = pd.read_csv(tif_file_index_path, index_col=[0, 1])
+tif_file_index = pd.DataFrame(
+    index=pd.MultiIndex.from_tuples([], names=['date_start', 'date_end'])
+    )
 
 i = 0
-n = len(hdf_names)
-for hdf_name, url in hdf_names.items():
+n = len(hdf_urls)
+for hdf_name, url in hdf_urls.items():
     progress = f"[{i+1:02d}/{n}]"
+
+    tif_fpath = TIF_DIR / (hdf_name + '.tif')
+    if tif_fpath.exists():
+        with rasterio.open(tif_fpath) as src:
+            print(f'{progress} NDVI data already downloaded and processed.')
+            meta_dict = src.tags()
+            tile_name = meta_dict.get('tile_name')
+            date_start = meta_dict.get('date_start')
+            date_end = meta_dict.get('date_end')
+        tif_file_index.loc[(date_start, date_end), tile_name] = tif_fpath.name
+        i += 1
+        continue
 
     # Download the MODIS HDF file.
 
     hdf_fpath = HDF_DIR / (hdf_name + '.hdf')
-
     if not hdf_fpath.exists():
         print(f'{progress} Downloading MODIS HDF file...')
         try:
             earthaccess.download(url, HDF_DIR, show_progress=False)
         except Exception:
             print(f'{progress} Failed to download NDVI data for {hdf_name}.')
-            index_df.to_csv(tif_file_index_path)
             break
 
     # Convert MODIS HDF file to GeoTIFF.
+    print(f'{progress} Converting to GeoTIFF...')
+    tile_name, date_start, date_end = MOD13Q1_hdf_to_geotiff(
+        hdf_fpath, 0, tif_fpath)
 
-    tif_fpath = TIF_DIR / (hdf_name + '.tif')
-
-    if not tif_fpath.exists():
-        print(f'{progress} Converting to GeoTIFF...')
-        tile_name, date_start, date_end = MOD13Q1_hdf_to_geotiff(
-            hdf_fpath, 0, tif_fpath)
-    else:
-        print(f'{progress} Fetching MODIS HDF metadata...')
-        with rasterio.open(tif_fpath) as src:
-            meta_dict = src.tags()
-            tile_name = meta_dict.get('tile_name')
-            date_start = meta_dict.get('date_start')
-            date_end = meta_dict.get('date_end')
-
-    index_df.loc[(date_start, date_end), tile_name] = tif_fpath.name
+    tif_file_index.loc[(date_start, date_end), tile_name] = tif_fpath.name
     i += 1
 
-    if i > 500:
-        break
 
-index_df.to_csv(tif_file_index_path)
+tif_file_index = tif_file_index.sort_index()
+tif_file_index.to_csv(tif_file_index_path)
 
 
 # %%
@@ -165,31 +188,37 @@ index_df.to_csv(tif_file_index_path)
 
 tif_file_index = pd.read_csv(tif_file_index_path, index_col=[0, 1])
 
-if not mosaic_index_path.exists():
-    mosaic_index = pd.DataFrame(
-        columns=['file'] + list(basins_gdf.index.astype(str)),
-        index=pd.date_range('2000-01-01', '2025-12-31')
-        )
-else:
-    mosaic_index = pd.read_csv(
-        mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
-        )
-
+mosaic_index = pd.DataFrame(
+    columns=['file', 'ntiles'],
+    index=pd.date_range('2000-01-01', '2025-12-31')
+    )
 
 ntot = len(tif_file_index)
 i = 0
 for index, row in tif_file_index.iterrows():
+    start = index[0].replace('-', '')
+    end = index[1].replace('-', '')
+
+    # Define the list of tiles to add to the mosaic.
+    tif_paths = [
+        TIF_DIR / tif_fname for tif_fname in row.values if
+        not pd.isnull(tif_fname)
+        ]
+
+    # Define the name of the final mosaic and check if it exists.
+    mosaic_path = MOSAIC_DIR / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.tif"
+    if mosaic_path.exists():
+        print(f"[{i+1:02d}/{ntot}] Mosaic already exists for {index[0]}.")
+        mosaic_index.loc[pd.date_range(*index), 'file'] = mosaic_path.name
+        mosaic_index.loc[pd.date_range(*index), 'ntiles'] = len(tif_paths)
+        i += 1
+        continue
+
     t0 = perf_counter()
     print(f"[{i+1:02d}/{ntot}] Producing a mosaic for {index[0]}...", end=' ')
 
     # Define the name of the VRT file.
-    start = index[0].replace('-', '')
-    end = index[1].replace('-', '')
     vrt_path = VRT_DIR / f"NDVI_MOD13Q1_{start}_{end}.vrt"
-
-    # Define the list of tiles to add to the VRT.
-    tif_paths = [TIF_DIR / tif_fname for tif_fname in row.values]
-    assert len(tif_paths) == 9
 
     # Build a VRT first.
     if not vrt_path.exists():
@@ -198,70 +227,99 @@ for index, row in tif_file_index.iterrows():
         del ds
 
     # Reprojected and assemble the tiles into a mosaic.
-    mosaic_path = MOSAIC_DIR / f"NDVI_MOD13Q1_{start}_{end}_ESRI102022.tif"
-    if not mosaic_path.exists():
-        warp_options = gdal.WarpOptions(
-            dstSRS='ESRI:102022',  # Africa Albers Equal Area Conic
-            format='GTiff',
-            resampleAlg='bilinear',
-            creationOptions=[
-                'COMPRESS=DEFLATE',
-                'TILED=YES',
-                'BIGTIFF=YES'
-                ]
-            )
+    warp_options = gdal.WarpOptions(
+        dstSRS='ESRI:102022',  # Africa Albers Equal Area Conic
+        format='GTiff',
+        resampleAlg='bilinear',
+        creationOptions=[
+            'COMPRESS=DEFLATE',
+            'TILED=YES',
+            'BIGTIFF=YES'
+            ]
+        )
 
-        ds_reproj = gdal.Warp(
-            str(mosaic_path),
-            str(vrt_path),
-            options=warp_options
-            )
-        ds_reproj.FlushCache()
-        del ds_reproj
+    ds_reproj = gdal.Warp(
+        str(mosaic_path),
+        str(vrt_path),
+        options=warp_options
+        )
+    ds_reproj.FlushCache()
+    del ds_reproj
 
     # Update the VRT file index.
     mosaic_index.loc[pd.date_range(*index), 'file'] = mosaic_path.name
+    mosaic_index.loc[pd.date_range(*index), 'ntiles'] = len(tif_paths)
 
     i += 1
     t1 = perf_counter()
     print(f'done in {t1 - t0:0.1f} sec')
 
+mosaic_index = mosaic_index.dropna(how='all')
 mosaic_index.to_csv(mosaic_index_path)
 
 # %%
 
-# Generate the basin zonal index map.
+# Generate the basin zonal index map for the PREDICT dataset, which
+# includes data for the whole African continent for the years defined
+# in 'predict_year_range'.
 
 mosaic_index = pd.read_csv(
     mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
     )
 
-basins_gdf = gpd.read_file(datadir / "data" / "wtd_basin_geometry.gpkg")
+# Make sure to run 'process_hydro_basins.py' to generate the
+# the 'basins_lvl12_102022.gpkg' file.
+print('Loading hydro atlas basin lvl12 database...', flush=True)
+basins_path = datadir / 'hydro_atlas' / 'basins_lvl12_102022.gpkg'
+basins_gdf = gpd.read_file(basins_path)
 basins_gdf = basins_gdf.set_index("HYBAS_ID", drop=True)
 basins_gdf.index = basins_gdf.index.astype(int)
 
-mosaic_fnames = mosaic_index.file
-mosaic_fnames = mosaic_fnames[~pd.isnull(mosaic_fnames)]
-mosaic_fnames = np.unique(mosaic_fnames)
+mask = (
+    (np.isin(mosaic_index.index.year, predict_year_range)) &
+    (~pd.isnull(mosaic_index.file))
+    )
 
+print('Building the basins zonal index map...', flush=True)
+mosaic_fnames = np.unique(mosaic_index.file[mask])
 zonal_index_map, bad_basin_ids = build_zonal_index_map(
     MOSAIC_DIR / mosaic_fnames[0], basins_gdf
     )
 
+print('Initiating the basin ndvi dataframe...', flush=True)
+index = mosaic_index.index[mask]
+columns = list(basins_gdf.index)
+basin_ndvi_means = pd.DataFrame(
+    data=np.full((len(index), len(columns)), np.nan, dtype='float32'),
+    index=index,
+    columns=columns
+    )
+
+basin_ndvi_means.to_hdf(basin_ndvi_path, key='ndvi', mode='w')
+
+
 # %%
 
-# Extract NDVI means for each basin.
+# Extract NDVI means for each basin of the African continent for the
+# years 2024-2025.
+
+mosaic_index = pd.read_csv(
+    mosaic_index_path, index_col=0, parse_dates=True, dtype={'file': str}
+    )
+
+basin_ndvi_means = pd.read_hdf(
+    basin_ndvi_path, key='ndvi'
+    )
 
 ntot = len(mosaic_fnames)
 count = 0
 for mosaic_name in mosaic_fnames:
     t0 = perf_counter()
-    mask_index = mosaic_index.file == mosaic_name
+    dates = mosaic_index.loc[mosaic_index.file == mosaic_name].index
 
-    if not np.any(pd.isnull(mosaic_index.loc[mask_index])):
-        print(f"[{count+1:02d}/{ntot}] Skipping "
-              f"already processed {mosaic_name}...")
-
+    if not np.any(pd.isnull(basin_ndvi_means.loc[dates])):
+        print(f"[{count+1:02d}/{ntot}] Skipping because {mosaic_name} "
+              f"is already processed.")
         count += 1
         continue
 
@@ -271,11 +329,15 @@ for mosaic_name in mosaic_fnames:
         MOSAIC_DIR / mosaic_name, zonal_index_map)
     mean_ndvi = mean_ndvi * 0.0001  # MODIS Int16 scale to physical NDVI
 
-    for i, basin_id in enumerate(basins_gdf.index):
-        mosaic_index.loc[mask_index, str(basin_id)] = mean_ndvi[i]
+    print()
+    print(perf_counter() - t0)
+
+    assert list(basin_ids) == list(basin_ndvi_means.columns)
+    basin_ndvi_means.loc[dates] = mean_ndvi.astype('float32')
 
     count += 1
     t1 = perf_counter()
     print(f'done in {t1 - t0:0.1f} sec')
 
-mosaic_index.to_csv(mosaic_index_path)
+# %%
+basin_ndvi_means.to_hdf(basin_ndvi_path, key='ndvi', mode='w')
